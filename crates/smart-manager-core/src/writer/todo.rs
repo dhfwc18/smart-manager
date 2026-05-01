@@ -69,44 +69,13 @@ fn html_escape(s: &str) -> String {
     out
 }
 
-const HTML_HEAD: &str = "<!DOCTYPE html>\n\
-<html lang=\"en\">\n\
-<head>\n\
-<meta charset=\"utf-8\">\n\
-<title>TODO</title>\n\
-<style>\n\
-body { font-family: system-ui, sans-serif; max-width: 820px; margin: 2em auto; padding: 0 1em; color: #1a1a1a; background: #fafafa; }\n\
-h1 { border-bottom: 2px solid #1f3a5f; padding-bottom: 0.3em; }\n\
-h2 { color: #1f3a5f; margin-top: 1.5em; }\n\
-ul { list-style: none; padding-left: 0; }\n\
-li { padding: 0.3em 0; border-bottom: 1px solid #eee; }\n\
-input[type=checkbox] { margin-right: 0.5em; transform: scale(1.2); }\n\
-.priority { font-weight: bold; padding: 0.1em 0.4em; border-radius: 3px; margin-right: 0.5em; color: #fff; font-size: 0.85em; }\n\
-.priority-critical { background: #7a1f1f; }\n\
-.priority-high { background: #a85a1f; }\n\
-.priority-medium { background: #1f3a5f; }\n\
-.priority-low { background: #555; }\n\
-.priority-longterm { background: #888; }\n\
-.days { color: #666; font-size: 0.9em; margin-left: 0.4em; }\n\
-@media (prefers-color-scheme: dark) {\n\
-  body { background: #1a1a1a; color: #f0f0f0; }\n\
-  h1 { border-color: #4a8db5; }\n\
-  h2 { color: #4a8db5; }\n\
-  li { border-color: #333; }\n\
-  .days { color: #aaa; }\n\
-}\n\
-</style>\n\
-</head>\n\
-<body>\n\
-<h1>TODO</h1>\n";
-
-const HTML_TAIL: &str = "</body>\n</html>\n";
+include!(concat!(env!("OUT_DIR"), "/todo_template.rs"));
 
 fn render_html(tasks: &[GanttTask]) -> String {
-    let mut s = String::from(HTML_HEAD);
+    let mut s = String::from(TODO_HTML_HEAD);
     if tasks.is_empty() {
         s.push_str("<p>(no tasks)</p>\n");
-        s.push_str(HTML_TAIL);
+        s.push_str(TODO_HTML_TAIL);
         return s;
     }
     for (section, section_tasks) in grouped_sorted(tasks) {
@@ -125,7 +94,7 @@ fn render_html(tasks: &[GanttTask]) -> String {
         }
         s.push_str("</ul>\n</section>\n");
     }
-    s.push_str(HTML_TAIL);
+    s.push_str(TODO_HTML_TAIL);
     s
 }
 
@@ -184,7 +153,7 @@ mod tests {
     #[test]
     fn test_render_html_with_no_tasks_emits_doctype_and_empty_message() {
         let out = render(&[], TodoFormat::Html);
-        assert!(out.starts_with("<!DOCTYPE html>"));
+        assert!(out.to_lowercase().starts_with("<!doctype html>"));
         assert!(out.contains("(no tasks)"));
         assert!(out.trim_end().ends_with("</html>"));
     }
