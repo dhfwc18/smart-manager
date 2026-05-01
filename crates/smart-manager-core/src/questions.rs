@@ -1,3 +1,21 @@
+#[derive(Debug, PartialEq, Eq)]
+pub enum QuestionError {
+    IncompleteAction { remaining: usize },
+}
+
+impl std::fmt::Display for QuestionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IncompleteAction { remaining } => write!(
+                f,
+                "cannot mark question answered: {remaining} action(s) still incomplete"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for QuestionError {}
+
 pub struct Objective {
     content: String,
     questions: Vec<Question>,
@@ -109,8 +127,15 @@ impl Question {
     pub fn set_priority(&mut self, priority: QuestionPriority) {
         self.priority = priority;
     }
-    pub fn set_answered(&mut self, answered: bool) {
+    pub fn set_answered(&mut self, answered: bool) -> Result<(), QuestionError> {
+        if answered {
+            let remaining = self.incomplete_action_count();
+            if remaining > 0 {
+                return Err(QuestionError::IncompleteAction { remaining });
+            }
+        }
         self.answered = answered;
+        Ok(())
     }
     pub fn push_action(&mut self, action: ActionPoint) {
         self.actions.push(action);
@@ -120,6 +145,17 @@ impl Question {
     }
     pub fn action_mut(&mut self, idx: usize) -> Option<&mut ActionPoint> {
         self.actions.get_mut(idx)
+    }
+
+    pub fn incomplete_action_count(&mut self) -> usize {
+        self.actions
+            .iter()
+            .filter(|action| !action.completed)
+            .count()
+    }
+
+    pub fn total_action_count(&mut self) -> usize {
+        self.actions.len()
     }
 }
 
@@ -206,7 +242,8 @@ mod tests {
         for a in actions {
             q.push_action(a);
         }
-        q.set_answered(answered);
+        q.set_answered(answered)
+            .expect("test setup: incomplete actions");
         q
     }
 
@@ -352,10 +389,37 @@ mod tests {
     }
 
     #[test]
-    fn test_set_answered_when_called_updates_flag() {
+    fn test_set_answered_with_no_actions_returns_ok_and_updates_flag() {
         let mut q = Question::new("q".into(), QuestionPriority::Low);
-        q.set_answered(true);
+        assert!(q.set_answered(true).is_ok());
         assert!(q.answered());
+    }
+
+    #[test]
+    fn test_set_answered_with_all_complete_returns_ok_and_updates_flag() {
+        let mut q = question_with(vec![action(1.0, true), action(2.0, true)], false);
+        assert!(q.set_answered(true).is_ok());
+        assert!(q.answered());
+    }
+
+    #[test]
+    fn test_set_answered_with_incomplete_actions_returns_unfinished_error() {
+        let mut q = question_with(vec![action(1.0, false), action(2.0, true)], false);
+        let remaining_action = q.incomplete_action_count();
+        assert_eq!(
+            q.set_answered(true),
+            Err(QuestionError::IncompleteAction {
+                remaining: remaining_action
+            })
+        );
+        assert!(!q.answered());
+    }
+
+    #[test]
+    fn test_set_answered_to_false_with_incomplete_actions_returns_ok() {
+        let mut q = question_with(vec![action(1.0, false)], false);
+        assert!(q.set_answered(false).is_ok());
+        assert!(!q.answered());
     }
 
     // Objective
@@ -381,7 +445,7 @@ mod tests {
             vec![action(1.0, false), action(2.0, true)],
             false,
         ));
-        o.push_question(question_with(vec![action(0.5, false)], true));
+        o.push_question(question_with(vec![action(0.5, true)], true));
         assert_eq!(o.total_allocated_timeframe(), 3.5);
     }
 
@@ -389,7 +453,7 @@ mod tests {
     fn test_remaining_time_needed_with_answered_question_excludes_it() {
         let mut o = Objective::new("obj".into());
         o.push_question(question_with(vec![action(1.0, false)], false));
-        o.push_question(question_with(vec![action(5.0, false)], true));
+        o.push_question(question_with(vec![action(5.0, true)], true));
         assert_eq!(o.remaining_time_needed(), 1.0);
     }
 
@@ -438,7 +502,7 @@ mod tests {
     fn test_question_mut_when_mutated_persists_changes() {
         let mut o = Objective::new("obj".into());
         o.push_question(Question::new("q".into(), QuestionPriority::Low));
-        o.question_mut(0).unwrap().set_answered(true);
+        o.question_mut(0).unwrap().set_answered(true).unwrap();
         assert!(o.questions()[0].answered());
     }
 
