@@ -16,6 +16,24 @@ impl std::fmt::Display for QuestionError {
 
 impl std::error::Error for QuestionError {}
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum ObjectiveError {
+    UnansweredQuestion { remaining: usize },
+}
+
+impl std::fmt::Display for ObjectiveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnansweredQuestion { remaining } => write!(
+                f,
+                "cannot mark objective met: {remaining} question(s) still unanswered"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ObjectiveError {}
+
 pub struct Objective {
     content: String,
     questions: Vec<Question>,
@@ -58,8 +76,15 @@ impl Objective {
     pub fn set_content(&mut self, content: String) {
         self.content = content;
     }
-    pub fn set_met(&mut self, met: bool) {
+    pub fn set_met(&mut self, met: bool) -> Result<(), ObjectiveError> {
+        if met {
+            let remaining = self.unanswered_question_count();
+            if remaining > 0 {
+                return Err(ObjectiveError::UnansweredQuestion { remaining });
+            }
+        }
         self.met = met;
+        Ok(())
     }
     pub fn push_question(&mut self, question: Question) {
         self.questions.push(question);
@@ -69,6 +94,17 @@ impl Objective {
     }
     pub fn question_mut(&mut self, idx: usize) -> Option<&mut Question> {
         self.questions.get_mut(idx)
+    }
+
+    pub fn unanswered_question_count(&mut self) -> usize {
+        self.questions
+            .iter()
+            .filter(|question| !question.answered())
+            .count()
+    }
+
+    pub fn total_question_count(&mut self) -> usize {
+        self.questions.len()
     }
 }
 
@@ -507,10 +543,39 @@ mod tests {
     }
 
     #[test]
-    fn test_set_met_when_called_updates_flag() {
+    fn test_set_met_with_no_questions_returns_ok_and_updates_flag() {
         let mut o = Objective::new("obj".into());
-        o.set_met(true);
+        assert!(o.set_met(true).is_ok());
         assert!(o.met());
+    }
+
+    #[test]
+    fn test_set_met_with_all_answered_returns_ok_and_updates_flag() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(question_with(vec![action(1.0, true)], true));
+        o.push_question(question_with(vec![], true));
+        assert!(o.set_met(true).is_ok());
+        assert!(o.met());
+    }
+
+    #[test]
+    fn test_set_met_with_unanswered_questions_returns_unanswered_error() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(question_with(vec![action(1.0, true)], true));
+        o.push_question(Question::new("q".into(), QuestionPriority::Low));
+        assert_eq!(
+            o.set_met(true),
+            Err(ObjectiveError::UnansweredQuestion { remaining: 1 })
+        );
+        assert!(!o.met());
+    }
+
+    #[test]
+    fn test_set_met_to_false_with_unanswered_questions_returns_ok() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(Question::new("q".into(), QuestionPriority::Low));
+        assert!(o.set_met(false).is_ok());
+        assert!(!o.met());
     }
 
     #[test]
