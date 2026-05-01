@@ -1,61 +1,10 @@
 pub mod gantt;
 pub mod todo;
 
-use crate::questions::{Objective, QuestionPriority};
+use crate::priority::Priority;
+use crate::questions::Objective;
 use crate::writer::gantt::GanttTask;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Priority {
-    Critical,
-    High,
-    Medium,
-    Low,
-    LongTerm,
-}
-
-impl Priority {
-    pub fn score(self) -> u8 {
-        match self {
-            Self::Critical => 4,
-            Self::High => 3,
-            Self::Medium => 2,
-            Self::Low => 1,
-            Self::LongTerm => 0,
-        }
-    }
-    pub fn letter(self) -> char {
-        match self {
-            Self::Critical => 'C',
-            Self::High => 'H',
-            Self::Medium => 'M',
-            Self::Low => 'L',
-            Self::LongTerm => 'T',
-        }
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Critical => "Critical",
-            Self::High => "High",
-            Self::Medium => "Medium",
-            Self::Low => "Low",
-            Self::LongTerm => "LongTerm",
-        }
-    }
-}
-
-impl From<&QuestionPriority> for Priority {
-    fn from(p: &QuestionPriority) -> Self {
-        match p {
-            QuestionPriority::Critical => Self::Critical,
-            QuestionPriority::High => Self::High,
-            QuestionPriority::Medium => Self::Medium,
-            QuestionPriority::Low => Self::Low,
-            QuestionPriority::LongTerm => Self::LongTerm,
-        }
-    }
-}
 
 pub fn objectives_to_gantt_tasks(objectives: &[Objective]) -> Vec<GanttTask> {
     let scores = tag_priority_score_sums(objectives);
@@ -133,21 +82,6 @@ mod tests {
             o.add_tag(Tag::new(*t));
         }
         o
-    }
-
-    #[test]
-    fn test_priority_from_question_priority_maps_each_variant() {
-        assert_eq!(
-            Priority::from(&QuestionPriority::Critical),
-            Priority::Critical
-        );
-        assert_eq!(Priority::from(&QuestionPriority::High), Priority::High);
-        assert_eq!(Priority::from(&QuestionPriority::Medium), Priority::Medium);
-        assert_eq!(Priority::from(&QuestionPriority::Low), Priority::Low);
-        assert_eq!(
-            Priority::from(&QuestionPriority::LongTerm),
-            Priority::LongTerm
-        );
     }
 
     #[test]

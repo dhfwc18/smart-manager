@@ -1,4 +1,4 @@
-use crate::writer::Priority;
+use crate::priority::Priority;
 use comfy_table::Table;
 use comfy_table::presets::ASCII_FULL;
 use serde::{Deserialize, Serialize};

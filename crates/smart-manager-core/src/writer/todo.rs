@@ -1,5 +1,5 @@
-use super::Priority;
 use super::gantt::{GanttTask, format_days, grouped_sorted};
+use crate::priority::Priority;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
