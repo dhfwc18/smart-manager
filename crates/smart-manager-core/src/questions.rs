@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum QuestionError {
     IncompleteAction { remaining: usize },
@@ -34,7 +36,7 @@ impl std::fmt::Display for ObjectiveError {
 
 impl std::error::Error for ObjectiveError {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Tag(String);
 
 impl Tag {
@@ -52,6 +54,7 @@ impl std::fmt::Display for Tag {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Objective {
     content: String,
     questions: Vec<Question>,
@@ -146,6 +149,7 @@ impl Objective {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum QuestionPriority {
     Critical = 4,
     High = 3,
@@ -154,6 +158,7 @@ pub enum QuestionPriority {
     LongTerm = 0,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Question {
     content: String,
     priority: QuestionPriority,
@@ -233,6 +238,7 @@ impl Question {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum ActionCategory {
     Writing,
     Managing,
@@ -257,6 +263,7 @@ impl ActionCategory {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct ActionPoint {
     content: String,
     category: ActionCategory,

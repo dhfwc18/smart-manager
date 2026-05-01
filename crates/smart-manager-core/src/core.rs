@@ -1,4 +1,7 @@
 use crate::questions::{Objective, ObjectiveError, Question, QuestionError, Tag};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AppError {
@@ -19,6 +22,96 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
+#[derive(Debug)]
+pub enum PersistError {
+    Io(std::io::Error),
+    Serde(serde_json::Error),
+    Validation(Vec<ValidationIssue>),
+}
+
+impl std::fmt::Display for PersistError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "io: {e}"),
+            Self::Serde(e) => write!(f, "serde: {e}"),
+            Self::Validation(issues) => {
+                writeln!(f, "validation failed ({} issue(s)):", issues.len())?;
+                for issue in issues {
+                    writeln!(f, "  - {issue}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for PersistError {}
+
+impl From<std::io::Error> for PersistError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<serde_json::Error> for PersistError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::Serde(e)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ValidationIssue {
+    NegativeRequiredTime {
+        obj_idx: usize,
+        q_idx: usize,
+        action_idx: usize,
+    },
+    AnsweredQuestionWithIncompleteActions {
+        obj_idx: usize,
+        q_idx: usize,
+        remaining: usize,
+    },
+    MetObjectiveWithUnansweredQuestions {
+        obj_idx: usize,
+        remaining: usize,
+    },
+    DuplicateTag {
+        obj_idx: usize,
+        name: String,
+    },
+}
+
+impl std::fmt::Display for ValidationIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NegativeRequiredTime {
+                obj_idx,
+                q_idx,
+                action_idx,
+            } => write!(
+                f,
+                "objective {obj_idx} question {q_idx} action {action_idx}: required_time is negative"
+            ),
+            Self::AnsweredQuestionWithIncompleteActions {
+                obj_idx,
+                q_idx,
+                remaining,
+            } => write!(
+                f,
+                "objective {obj_idx} question {q_idx} answered but {remaining} action(s) incomplete"
+            ),
+            Self::MetObjectiveWithUnansweredQuestions { obj_idx, remaining } => write!(
+                f,
+                "objective {obj_idx} met but {remaining} question(s) unanswered"
+            ),
+            Self::DuplicateTag { obj_idx, name } => {
+                write!(f, "objective {obj_idx} has duplicate tag {name:?}")
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct App {
     objectives: Vec<Objective>,
 }
@@ -115,6 +208,78 @@ impl App {
             .filter(|o| !o.met())
             .map(|o| o.remaining_time_needed())
             .sum()
+    }
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(s)
+    }
+
+    pub fn save(&self, path: &Path) -> Result<(), PersistError> {
+        let json = self.to_json()?;
+        fs::write(path, json)?;
+        Ok(())
+    }
+
+    pub fn load(path: &Path) -> Result<Self, PersistError> {
+        let data = fs::read_to_string(path)?;
+        let app = Self::from_json(&data)?;
+        let issues = app.validate();
+        if !issues.is_empty() {
+            return Err(PersistError::Validation(issues));
+        }
+        Ok(app)
+    }
+
+    pub fn validate(&self) -> Vec<ValidationIssue> {
+        let mut issues = Vec::new();
+        for (oi, o) in self.objectives.iter().enumerate() {
+            let mut seen: Vec<&str> = Vec::new();
+            for t in o.tags() {
+                if seen.contains(&t.name()) {
+                    issues.push(ValidationIssue::DuplicateTag {
+                        obj_idx: oi,
+                        name: t.name().to_string(),
+                    });
+                } else {
+                    seen.push(t.name());
+                }
+            }
+            if o.met() {
+                let unanswered = o.questions().iter().filter(|q| !q.answered()).count();
+                if unanswered > 0 {
+                    issues.push(ValidationIssue::MetObjectiveWithUnansweredQuestions {
+                        obj_idx: oi,
+                        remaining: unanswered,
+                    });
+                }
+            }
+            for (qi, q) in o.questions().iter().enumerate() {
+                if q.answered() {
+                    let incomplete = q.actions().iter().filter(|a| !a.completed()).count();
+                    if incomplete > 0 {
+                        issues.push(ValidationIssue::AnsweredQuestionWithIncompleteActions {
+                            obj_idx: oi,
+                            q_idx: qi,
+                            remaining: incomplete,
+                        });
+                    }
+                }
+                for (ai, a) in q.actions().iter().enumerate() {
+                    if a.required_time() < 0.0 {
+                        issues.push(ValidationIssue::NegativeRequiredTime {
+                            obj_idx: oi,
+                            q_idx: qi,
+                            action_idx: ai,
+                        });
+                    }
+                }
+            }
+        }
+        issues
     }
 }
 
@@ -219,5 +384,159 @@ mod tests {
         app.push_objective(objective_with_action("b", 4.0, false));
         app.add_tag(0, Tag::new("work")).unwrap();
         assert_eq!(app.remaining_time_needed_for_tag("work"), 1.5);
+    }
+
+    fn populated_app() -> App {
+        let mut app = App::new();
+        app.push_objective(objective_with_action("a", 1.5, false));
+        app.push_objective(objective_with_action("b", 2.0, true));
+        app.add_tag(0, Tag::new("work")).unwrap();
+        app.add_tag(1, Tag::new("home")).unwrap();
+        app.push_question(0, Question::new("q2".into(), QuestionPriority::High))
+            .unwrap();
+        app
+    }
+
+    #[test]
+    fn test_to_json_emits_object_with_objectives_array() {
+        let app = populated_app();
+        let json = app.to_json().unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["objectives"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_from_json_round_trips_through_to_json() {
+        let app = populated_app();
+        let json = app.to_json().unwrap();
+        let restored = App::from_json(&json).unwrap();
+        assert_eq!(restored.objectives().len(), app.objectives().len());
+        assert_eq!(restored.objectives()[0].content(), "a");
+        assert!(restored.objectives()[0].has_tag("work"));
+        assert!(restored.objectives()[1].has_tag("home"));
+        assert_eq!(
+            restored.remaining_time_needed(),
+            app.remaining_time_needed()
+        );
+        assert_eq!(
+            restored.objectives()[0].questions().len(),
+            app.objectives()[0].questions().len()
+        );
+    }
+
+    #[test]
+    fn test_save_and_load_persist_app_state() {
+        let path = std::env::temp_dir().join("smart_manager_app_test.json");
+        let _ = std::fs::remove_file(&path);
+        let app = populated_app();
+        app.save(&path).unwrap();
+        let restored = App::load(&path).unwrap();
+        assert_eq!(restored.objectives().len(), app.objectives().len());
+        assert_eq!(
+            restored.objectives()[0].questions().len(),
+            app.objectives()[0].questions().len()
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_load_with_missing_file_returns_io_error() {
+        let path = std::env::temp_dir().join("smart_manager_app_definitely_missing.json");
+        let _ = std::fs::remove_file(&path);
+        let err = App::load(&path).err().expect("load should fail");
+        assert!(matches!(err, PersistError::Io(_)));
+    }
+
+    #[test]
+    fn test_from_json_with_invalid_json_returns_error() {
+        assert!(App::from_json("{ not json").is_err());
+    }
+
+    #[test]
+    fn test_validate_with_clean_app_returns_empty_vec() {
+        let app = populated_app();
+        assert!(app.validate().is_empty());
+    }
+
+    #[test]
+    fn test_validate_with_negative_required_time_reports_issue() {
+        let json = r#"{"objectives":[{"content":"x","questions":[{"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":-5.0,"completed":false}],"answered":false}],"tags":[],"met":false}]}"#;
+        let app = App::from_json(json).unwrap();
+        let issues = app.validate();
+        assert_eq!(issues.len(), 1);
+        assert!(matches!(
+            issues[0],
+            ValidationIssue::NegativeRequiredTime {
+                obj_idx: 0,
+                q_idx: 0,
+                action_idx: 0
+            }
+        ));
+    }
+
+    #[test]
+    fn test_validate_with_answered_question_having_incomplete_actions_reports_issue() {
+        let json = r#"{"objectives":[{"content":"x","questions":[{"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":1.0,"completed":false}],"answered":true}],"tags":[],"met":false}]}"#;
+        let app = App::from_json(json).unwrap();
+        let issues = app.validate();
+        assert!(matches!(
+            issues[0],
+            ValidationIssue::AnsweredQuestionWithIncompleteActions {
+                obj_idx: 0,
+                q_idx: 0,
+                remaining: 1
+            }
+        ));
+    }
+
+    #[test]
+    fn test_validate_with_met_objective_having_unanswered_questions_reports_issue() {
+        let json = r#"{"objectives":[{"content":"x","questions":[{"content":"q","priority":"Medium","actions":[],"answered":false}],"tags":[],"met":true}]}"#;
+        let app = App::from_json(json).unwrap();
+        let issues = app.validate();
+        assert!(matches!(
+            issues[0],
+            ValidationIssue::MetObjectiveWithUnansweredQuestions {
+                obj_idx: 0,
+                remaining: 1
+            }
+        ));
+    }
+
+    #[test]
+    fn test_validate_with_duplicate_tags_reports_issue() {
+        let json =
+            r#"{"objectives":[{"content":"x","questions":[],"tags":["work","work"],"met":false}]}"#;
+        let app = App::from_json(json).unwrap();
+        let issues = app.validate();
+        assert_eq!(issues.len(), 1);
+        assert!(matches!(
+            &issues[0],
+            ValidationIssue::DuplicateTag { obj_idx: 0, name } if name == "work"
+        ));
+    }
+
+    #[test]
+    fn test_validate_collects_all_issues() {
+        let json = r#"{"objectives":[
+            {"content":"a","questions":[{"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":-1.0,"completed":false}],"answered":true}],"tags":["x","x"],"met":false},
+            {"content":"b","questions":[{"content":"q","priority":"Medium","actions":[],"answered":false}],"tags":[],"met":true}
+        ]}"#;
+        let app = App::from_json(json).unwrap();
+        let issues = app.validate();
+        assert_eq!(issues.len(), 4);
+    }
+
+    #[test]
+    fn test_load_with_invariant_violation_returns_validation_error() {
+        let path = std::env::temp_dir().join("smart_manager_app_invalid.json");
+        std::fs::write(
+            &path,
+            r#"{"objectives":[{"content":"x","questions":[{"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":-5.0,"completed":false}],"answered":false}],"tags":[],"met":false}]}"#,
+        )
+        .unwrap();
+        let err = App::load(&path).err().expect("load should fail");
+        assert!(matches!(err, PersistError::Validation(_)));
+        let _ = std::fs::remove_file(&path);
     }
 }
