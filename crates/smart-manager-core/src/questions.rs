@@ -32,6 +32,7 @@ impl Objective {
     pub fn remaining_time_needed(&self) -> f32 {
         self.questions
             .iter()
+            .filter(|question| !question.answered())
             .map(|question| question.remaining_time_needed())
             .sum()
     }
