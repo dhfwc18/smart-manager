@@ -190,3 +190,269 @@ impl ActionPoint {
         self.completed = completed;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn action(time: f32, completed: bool) -> ActionPoint {
+        let mut a = ActionPoint::new("a".to_string(), ActionCategory::Writing, time);
+        a.set_completed(completed);
+        a
+    }
+
+    fn question_with(actions: Vec<ActionPoint>, answered: bool) -> Question {
+        let mut q = Question::new("q".to_string(), QuestionPriority::Medium);
+        for a in actions {
+            q.push_action(a);
+        }
+        q.set_answered(answered);
+        q
+    }
+
+    // ActionCategory
+
+    #[test]
+    fn test_as_str_writing_returns_writing() {
+        assert_eq!(ActionCategory::Writing.as_str(), "writing");
+    }
+
+    #[test]
+    fn test_as_str_presentation_returns_presentation() {
+        assert_eq!(ActionCategory::Presentation.as_str(), "presentation");
+    }
+
+    // ActionPoint
+
+    #[test]
+    fn test_new_action_with_valid_time_stores_value() {
+        let a = ActionPoint::new("write".into(), ActionCategory::Writing, 2.5);
+        assert_eq!(a.content(), "write");
+        assert_eq!(a.required_time(), 2.5);
+        assert!(!a.completed());
+    }
+
+    #[test]
+    fn test_new_action_with_negative_time_clamps_to_zero() {
+        let a = ActionPoint::new("x".into(), ActionCategory::Writing, -3.0);
+        assert_eq!(a.required_time(), 0.0);
+    }
+
+    #[test]
+    fn test_set_required_time_with_negative_clamps_to_zero() {
+        let mut a = ActionPoint::new("x".into(), ActionCategory::Writing, 1.0);
+        a.set_required_time(-5.0);
+        assert_eq!(a.required_time(), 0.0);
+    }
+
+    #[test]
+    fn test_set_required_time_with_positive_updates_value() {
+        let mut a = ActionPoint::new("x".into(), ActionCategory::Writing, 1.0);
+        a.set_required_time(4.5);
+        assert_eq!(a.required_time(), 4.5);
+    }
+
+    #[test]
+    fn test_set_completed_when_called_updates_flag() {
+        let mut a = ActionPoint::new("x".into(), ActionCategory::Writing, 1.0);
+        a.set_completed(true);
+        assert!(a.completed());
+    }
+
+    #[test]
+    fn test_set_category_when_called_updates_category() {
+        let mut a = ActionPoint::new("x".into(), ActionCategory::Writing, 1.0);
+        a.set_category(ActionCategory::Research);
+        assert_eq!(a.category().as_str(), "research");
+    }
+
+    #[test]
+    fn test_set_content_on_action_when_called_updates_content() {
+        let mut a = ActionPoint::new("old".into(), ActionCategory::Writing, 1.0);
+        a.set_content("new".into());
+        assert_eq!(a.content(), "new");
+    }
+
+    // Question
+
+    #[test]
+    fn test_new_question_with_priority_initializes_empty() {
+        let q = Question::new("hello".into(), QuestionPriority::High);
+        assert_eq!(q.content(), "hello");
+        assert!(q.actions().is_empty());
+        assert!(!q.answered());
+    }
+
+    #[test]
+    fn test_total_time_required_with_no_actions_returns_zero() {
+        let q = Question::new("q".into(), QuestionPriority::Low);
+        assert_eq!(q.total_time_required(), 0.0);
+    }
+
+    #[test]
+    fn test_total_time_required_with_mixed_completion_sums_all() {
+        let q = question_with(vec![action(1.0, false), action(2.5, true)], false);
+        assert_eq!(q.total_time_required(), 3.5);
+    }
+
+    #[test]
+    fn test_remaining_time_needed_with_all_completed_returns_zero() {
+        let q = question_with(vec![action(1.0, true), action(2.0, true)], false);
+        assert_eq!(q.remaining_time_needed(), 0.0);
+    }
+
+    #[test]
+    fn test_remaining_time_needed_with_mixed_completion_sums_incomplete() {
+        let q = question_with(
+            vec![action(1.0, false), action(2.5, true), action(0.5, false)],
+            false,
+        );
+        assert_eq!(q.remaining_time_needed(), 1.5);
+    }
+
+    #[test]
+    fn test_push_action_when_called_appends_to_actions() {
+        let mut q = Question::new("q".into(), QuestionPriority::Low);
+        q.push_action(action(1.0, false));
+        assert_eq!(q.actions().len(), 1);
+    }
+
+    #[test]
+    fn test_remove_action_with_valid_idx_returns_action_and_shrinks() {
+        let mut q = question_with(vec![action(1.0, false), action(2.0, false)], false);
+        let removed = q.remove_action(0);
+        assert_eq!(removed.required_time(), 1.0);
+        assert_eq!(q.actions().len(), 1);
+    }
+
+    #[test]
+    fn test_action_mut_with_valid_idx_returns_some() {
+        let mut q = question_with(vec![action(1.0, false)], false);
+        assert!(q.action_mut(0).is_some());
+    }
+
+    #[test]
+    fn test_action_mut_with_out_of_bounds_returns_none() {
+        let mut q = Question::new("q".into(), QuestionPriority::Low);
+        assert!(q.action_mut(0).is_none());
+    }
+
+    #[test]
+    fn test_action_mut_when_mutated_persists_changes() {
+        let mut q = question_with(vec![action(1.0, false)], false);
+        q.action_mut(0).unwrap().set_completed(true);
+        assert!(q.actions()[0].completed());
+    }
+
+    #[test]
+    fn test_set_priority_when_called_updates_priority() {
+        let mut q = Question::new("q".into(), QuestionPriority::Low);
+        q.set_priority(QuestionPriority::Critical);
+        assert!(matches!(q.priority(), QuestionPriority::Critical));
+    }
+
+    #[test]
+    fn test_set_answered_when_called_updates_flag() {
+        let mut q = Question::new("q".into(), QuestionPriority::Low);
+        q.set_answered(true);
+        assert!(q.answered());
+    }
+
+    // Objective
+
+    #[test]
+    fn test_new_objective_with_content_initializes_empty_unmet() {
+        let o = Objective::new("obj".into());
+        assert_eq!(o.content(), "obj");
+        assert!(o.questions().is_empty());
+        assert!(!o.met());
+    }
+
+    #[test]
+    fn test_total_allocated_timeframe_with_no_questions_returns_zero() {
+        let o = Objective::new("obj".into());
+        assert_eq!(o.total_allocated_timeframe(), 0.0);
+    }
+
+    #[test]
+    fn test_total_allocated_timeframe_with_multiple_questions_sums_all() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(question_with(
+            vec![action(1.0, false), action(2.0, true)],
+            false,
+        ));
+        o.push_question(question_with(vec![action(0.5, false)], true));
+        assert_eq!(o.total_allocated_timeframe(), 3.5);
+    }
+
+    #[test]
+    fn test_remaining_time_needed_with_answered_question_excludes_it() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(question_with(vec![action(1.0, false)], false));
+        o.push_question(question_with(vec![action(5.0, false)], true));
+        assert_eq!(o.remaining_time_needed(), 1.0);
+    }
+
+    #[test]
+    fn test_remaining_time_needed_with_all_unanswered_sums_incomplete_actions() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(question_with(
+            vec![action(1.0, false), action(2.0, true)],
+            false,
+        ));
+        o.push_question(question_with(vec![action(3.0, false)], false));
+        assert_eq!(o.remaining_time_needed(), 4.0);
+    }
+
+    #[test]
+    fn test_push_question_when_called_appends_to_questions() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(Question::new("q".into(), QuestionPriority::Low));
+        assert_eq!(o.questions().len(), 1);
+    }
+
+    #[test]
+    fn test_remove_question_with_valid_idx_returns_question_and_shrinks() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(Question::new("first".into(), QuestionPriority::Low));
+        o.push_question(Question::new("second".into(), QuestionPriority::High));
+        let removed = o.remove_question(0);
+        assert_eq!(removed.content(), "first");
+        assert_eq!(o.questions().len(), 1);
+    }
+
+    #[test]
+    fn test_question_mut_with_valid_idx_returns_some() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(Question::new("q".into(), QuestionPriority::Low));
+        assert!(o.question_mut(0).is_some());
+    }
+
+    #[test]
+    fn test_question_mut_with_out_of_bounds_returns_none() {
+        let mut o = Objective::new("obj".into());
+        assert!(o.question_mut(0).is_none());
+    }
+
+    #[test]
+    fn test_question_mut_when_mutated_persists_changes() {
+        let mut o = Objective::new("obj".into());
+        o.push_question(Question::new("q".into(), QuestionPriority::Low));
+        o.question_mut(0).unwrap().set_answered(true);
+        assert!(o.questions()[0].answered());
+    }
+
+    #[test]
+    fn test_set_met_when_called_updates_flag() {
+        let mut o = Objective::new("obj".into());
+        o.set_met(true);
+        assert!(o.met());
+    }
+
+    #[test]
+    fn test_set_content_on_objective_when_called_updates_content() {
+        let mut o = Objective::new("old".into());
+        o.set_content("new".into());
+        assert_eq!(o.content(), "new");
+    }
+}
