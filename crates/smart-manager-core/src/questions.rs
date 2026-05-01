@@ -34,9 +34,28 @@ impl std::fmt::Display for ObjectiveError {
 
 impl std::error::Error for ObjectiveError {}
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Tag(String);
+
+impl Tag {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Tag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 pub struct Objective {
     content: String,
     questions: Vec<Question>,
+    tags: Vec<Tag>,
     met: bool,
 }
 
@@ -45,6 +64,7 @@ impl Objective {
         Self {
             content,
             questions: Vec::new(),
+            tags: Vec::new(),
             met: false,
         }
     }
@@ -55,8 +75,26 @@ impl Objective {
     pub fn questions(&self) -> &[Question] {
         &self.questions
     }
+    pub fn tags(&self) -> &[Tag] {
+        &self.tags
+    }
     pub fn met(&self) -> bool {
         self.met
+    }
+
+    pub fn has_tag(&self, name: &str) -> bool {
+        self.tags.iter().any(|t| t.name() == name)
+    }
+    pub fn add_tag(&mut self, tag: Tag) -> bool {
+        if self.has_tag(tag.name()) {
+            return false;
+        }
+        self.tags.push(tag);
+        true
+    }
+    pub fn remove_tag(&mut self, name: &str) -> Option<Tag> {
+        let idx = self.tags.iter().position(|t| t.name() == name)?;
+        Some(self.tags.remove(idx))
     }
 
     pub fn total_allocated_timeframe(&self) -> f32 {
@@ -583,5 +621,47 @@ mod tests {
         let mut o = Objective::new("old".into());
         o.set_content("new".into());
         assert_eq!(o.content(), "new");
+    }
+
+    #[test]
+    fn test_new_objective_has_no_tags() {
+        let o = Objective::new("o".into());
+        assert!(o.tags().is_empty());
+    }
+
+    #[test]
+    fn test_add_tag_with_new_tag_appends_and_returns_true() {
+        let mut o = Objective::new("o".into());
+        assert!(o.add_tag(Tag::new("work")));
+        assert_eq!(o.tags().len(), 1);
+        assert!(o.has_tag("work"));
+    }
+
+    #[test]
+    fn test_add_tag_with_duplicate_name_returns_false() {
+        let mut o = Objective::new("o".into());
+        o.add_tag(Tag::new("work"));
+        assert!(!o.add_tag(Tag::new("work")));
+        assert_eq!(o.tags().len(), 1);
+    }
+
+    #[test]
+    fn test_remove_tag_with_existing_name_returns_some() {
+        let mut o = Objective::new("o".into());
+        o.add_tag(Tag::new("work"));
+        assert_eq!(o.remove_tag("work"), Some(Tag::new("work")));
+        assert!(!o.has_tag("work"));
+    }
+
+    #[test]
+    fn test_remove_tag_with_missing_name_returns_none() {
+        let mut o = Objective::new("o".into());
+        assert!(o.remove_tag("missing").is_none());
+    }
+
+    #[test]
+    fn test_has_tag_with_missing_name_returns_false() {
+        let o = Objective::new("o".into());
+        assert!(!o.has_tag("anything"));
     }
 }
