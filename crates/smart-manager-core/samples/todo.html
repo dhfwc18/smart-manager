@@ -24,9 +24,24 @@
                 list-style: none;
                 padding-left: 0;
             }
+            ul ul {
+                padding-left: 1.5em;
+                margin: 0.2em 0 0.6em 0;
+            }
             li {
                 padding: 0.3em 0;
                 border-bottom: 1px solid #eee;
+            }
+            li li {
+                border-bottom: none;
+                padding: 0.15em 0;
+                font-size: 0.95em;
+                color: #444;
+            }
+            @media (prefers-color-scheme: dark) {
+                li li {
+                    color: #ccc;
+                }
             }
             input[type="checkbox"] {
                 margin-right: 0.5em;
@@ -81,20 +96,108 @@
         </style>
     </head>
     <body>
-        <h1>TODO</h1>
+        <h1>TODOs</h1>
         <section>
-<h2>work</h2>
-<ul>
-<li><input type="checkbox"><span class="priority priority-critical">Critical</span>Ship MVP<span class="days">(7d)</span></li>
-<li><input type="checkbox"><span class="priority priority-low">Low</span>Refresh public docs<span class="days">(2d)</span></li>
-</ul>
-</section>
-<section>
-<h2>personal</h2>
-<ul>
-<li><input type="checkbox"><span class="priority priority-longterm">LongTerm</span>Learn type theory<span class="days">(3d)</span></li>
-</ul>
-</section>
-
+            <h2>Ship MVP</h2>
+            <ul>
+                <li>
+                    <input type="checkbox" /><span
+                        class="priority priority-critical"
+                        >Critical</span
+                    >[Q2] Who is the pilot user?<span class="days">(2d)</span>
+                    <ul>
+                        <li>
+                            <input type="checkbox" />Outreach to candidates<span
+                                class="days"
+                                >(2d, managing)</span
+                            >
+                        </li>
+                    </ul>
+                </li>
+                <li>
+                    <input type="checkbox" /><span
+                        class="priority priority-high"
+                        >High</span
+                    >[Q0] Is the data model right?<span class="days">(3d)</span>
+                    <ul>
+                        <li>
+                            <input type="checkbox" />Design schema<span
+                                class="days"
+                                >(2d, analysis)</span
+                            >
+                        </li>
+                        <li>
+                            <input type="checkbox" />Write migration<span
+                                class="days"
+                                >(1d, programming)</span
+                            >
+                        </li>
+                    </ul>
+                </li>
+                <li>
+                    <input type="checkbox" /><span
+                        class="priority priority-medium"
+                        >Medium</span
+                    >[Q1] Which platforms first?<span class="days">(2d)</span>
+                    <ul>
+                        <li>
+                            <input type="checkbox" />Compare desktop vs web<span
+                                class="days"
+                                >(1.5d, research)</span
+                            >
+                        </li>
+                        <li>
+                            <input type="checkbox" />Decision doc<span
+                                class="days"
+                                >(0.5d, writing)</span
+                            >
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </section>
+        <section>
+            <h2>Refresh public docs</h2>
+            <ul>
+                <li>
+                    <input type="checkbox" /><span class="priority priority-low"
+                        >Low</span
+                    >[Q0] Are docs current?<span class="days">(3d)</span>
+                    <ul>
+                        <li>
+                            <input type="checkbox" checked />Audit landing
+                            page<span class="days">(1d, qa)</span>
+                        </li>
+                        <li>
+                            <input type="checkbox" />Rewrite quickstart<span
+                                class="days"
+                                >(2d, writing)</span
+                            >
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </section>
+        <section>
+            <h2>Learn type theory</h2>
+            <ul>
+                <li>
+                    <input type="checkbox" /><span
+                        class="priority priority-longterm"
+                        >LongTerm</span
+                    >[Q0] What&#39;s the right textbook?<span class="days"
+                        >(3d)</span
+                    >
+                    <ul>
+                        <li>
+                            <input type="checkbox" />Read TaPL ch.1<span
+                                class="days"
+                                >(3d, research)</span
+                            >
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </section>
     </body>
 </html>

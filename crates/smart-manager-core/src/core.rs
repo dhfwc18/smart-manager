@@ -302,11 +302,11 @@ impl App {
     }
 
     pub fn render_todo(&self, format: TodoFormat) -> String {
-        todo::render(&self.gantt_tasks(), format)
+        todo::render(&self.objectives, format)
     }
 
     pub fn save_todo(&self, format: TodoFormat, path: &Path) -> std::io::Result<()> {
-        todo::save(&self.gantt_tasks(), format, path)
+        todo::save(&self.objectives, format, path)
     }
 }
 
