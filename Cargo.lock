@@ -4813,7 +4813,6 @@ name = "smart-manager"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "smart-manager-core",
 ]
 
 [[package]]

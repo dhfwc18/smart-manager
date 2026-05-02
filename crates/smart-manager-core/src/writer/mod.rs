@@ -6,6 +6,114 @@ use crate::questions::Objective;
 use crate::writer::gantt::GanttTask;
 use std::collections::HashMap;
 
+/// One objective's worth of questions, ordered for the gantt chart.
+#[derive(Debug, Clone)]
+pub struct ObjectiveSchedule {
+    pub objective: String,
+    pub met: bool,
+    pub questions: Vec<ScheduledQuestion>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScheduledQuestion {
+    pub id: usize,
+    pub content: String,
+    pub priority: Priority,
+    pub days: f32,
+    pub answered: bool,
+    pub prereq: Option<usize>,
+    pub actions: Vec<ScheduledAction>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScheduledAction {
+    pub content: String,
+    pub category: String,
+    pub days: f32,
+    pub completed: bool,
+}
+
+pub fn objectives_to_schedule(objectives: &[Objective]) -> Vec<ObjectiveSchedule> {
+    objectives.iter().map(objective_to_schedule).collect()
+}
+
+fn objective_to_schedule(o: &Objective) -> ObjectiveSchedule {
+    let order = sort_questions_for_gantt(o);
+    let qs = o.questions();
+    let questions = order
+        .into_iter()
+        .map(|i| {
+            let q = &qs[i];
+            ScheduledQuestion {
+                id: q.id(),
+                content: q.content().to_string(),
+                priority: Priority::from(q.priority()),
+                days: q.total_time_required(),
+                answered: q.answered(),
+                prereq: q.prereq(),
+                actions: q
+                    .actions()
+                    .iter()
+                    .map(|a| ScheduledAction {
+                        content: a.content().to_string(),
+                        category: a.category().as_str().to_string(),
+                        days: a.required_time(),
+                        completed: a.completed(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    ObjectiveSchedule {
+        objective: o.content().to_string(),
+        met: o.met(),
+        questions,
+    }
+}
+
+/// Order questions for gantt rendering:
+/// - higher priority first;
+/// - within the same priority tier, questions with no prereq come before
+///   questions with a prereq (singles before chains);
+/// - when a question is selected, its full prereq chain is emitted root-first
+///   immediately before it, even if some prereqs have lower priority.
+fn sort_questions_for_gantt(o: &Objective) -> Vec<usize> {
+    let qs = o.questions();
+    let n = qs.len();
+    let mut placed = vec![false; n];
+    let mut order: Vec<usize> = Vec::with_capacity(n);
+
+    let priority_score = |i: usize| Priority::from(qs[i].priority()).score();
+    let prereq_idx = |i: usize| {
+        qs[i]
+            .prereq()
+            .and_then(|pid| qs.iter().position(|q| q.id() == pid))
+    };
+
+    while let Some(seed) = (0..n).filter(|&i| !placed[i]).min_by(|&a, &b| {
+        priority_score(b)
+            .cmp(&priority_score(a))
+            .then(qs[a].prereq().is_some().cmp(&qs[b].prereq().is_some()))
+            .then(qs[a].id().cmp(&qs[b].id()))
+    }) {
+        let mut chain: Vec<usize> = Vec::new();
+        let mut cur = Some(seed);
+        while let Some(idx) = cur {
+            if placed[idx] || chain.contains(&idx) {
+                break;
+            }
+            chain.push(idx);
+            cur = prereq_idx(idx);
+        }
+        chain.reverse();
+        for idx in chain {
+            order.push(idx);
+            placed[idx] = true;
+        }
+    }
+    order
+}
+
 pub fn objectives_to_gantt_tasks(objectives: &[Objective]) -> Vec<GanttTask> {
     let scores = tag_priority_score_sums(objectives);
     objectives
@@ -71,12 +179,12 @@ fn pick_group(o: &Objective, scores: &HashMap<String, u32>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::questions::{Question, QuestionPriority, Tag};
+    use crate::questions::{QuestionPriority, Tag};
 
     fn objective(content: &str, priorities: Vec<QuestionPriority>, tags: &[&str]) -> Objective {
         let mut o = Objective::new(content.into());
         for p in priorities {
-            o.push_question(Question::new("q".into(), p));
+            o.add_question("q".into(), p, None);
         }
         for t in tags {
             o.add_tag(Tag::new(*t));

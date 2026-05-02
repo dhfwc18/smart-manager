@@ -43,6 +43,7 @@ impl Tag {
     pub fn new(name: impl Into<String>) -> Self {
         Self(name.into())
     }
+
     pub fn name(&self) -> &str {
         &self.0
     }
@@ -60,6 +61,7 @@ pub struct Objective {
     questions: Vec<Question>,
     tags: Vec<Tag>,
     met: bool,
+    next_question_id: usize,
 }
 
 impl Objective {
@@ -69,18 +71,22 @@ impl Objective {
             questions: Vec::new(),
             tags: Vec::new(),
             met: false,
+            next_question_id: 0,
         }
     }
 
     pub fn content(&self) -> &str {
         &self.content
     }
+
     pub fn questions(&self) -> &[Question] {
         &self.questions
     }
+
     pub fn tags(&self) -> &[Tag] {
         &self.tags
     }
+
     pub fn met(&self) -> bool {
         self.met
     }
@@ -88,6 +94,7 @@ impl Objective {
     pub fn has_tag(&self, name: &str) -> bool {
         self.tags.iter().any(|t| t.name() == name)
     }
+
     pub fn add_tag(&mut self, tag: Tag) -> bool {
         if self.has_tag(tag.name()) {
             return false;
@@ -95,6 +102,7 @@ impl Objective {
         self.tags.push(tag);
         true
     }
+
     pub fn remove_tag(&mut self, name: &str) -> Option<Tag> {
         let idx = self.tags.iter().position(|t| t.name() == name)?;
         Some(self.tags.remove(idx))
@@ -106,6 +114,7 @@ impl Objective {
             .map(|question| question.total_time_required())
             .sum()
     }
+
     pub fn remaining_time_needed(&self) -> f32 {
         self.questions
             .iter()
@@ -117,6 +126,7 @@ impl Objective {
     pub fn set_content(&mut self, content: String) {
         self.content = content;
     }
+
     pub fn set_met(&mut self, met: bool) -> Result<(), ObjectiveError> {
         if met {
             let remaining = self.unanswered_question_count();
@@ -127,24 +137,47 @@ impl Objective {
         self.met = met;
         Ok(())
     }
-    pub fn push_question(&mut self, question: Question) {
-        self.questions.push(question);
+
+    /// Append a new question with an auto-assigned id.
+    /// Returns a mutable reference so the caller can chain action additions.
+    pub fn add_question(
+        &mut self,
+        content: String,
+        priority: QuestionPriority,
+        prereq: Option<usize>,
+    ) -> &mut Question {
+        let id = self.next_question_id;
+        self.next_question_id += 1;
+        self.questions
+            .push(Question::new(id, content, priority, prereq));
+        self.questions.last_mut().expect("question was just pushed")
     }
+
     pub fn remove_question(&mut self, idx: usize) -> Question {
         self.questions.remove(idx)
     }
+
     pub fn question_mut(&mut self, idx: usize) -> Option<&mut Question> {
         self.questions.get_mut(idx)
     }
 
-    pub fn unanswered_question_count(&mut self) -> usize {
+    /// Look up a question by its stable id.
+    pub fn question_by_id(&self, id: usize) -> Option<&Question> {
+        self.questions.iter().find(|q| q.id() == id)
+    }
+
+    pub fn question_idx_by_id(&self, id: usize) -> Option<usize> {
+        self.questions.iter().position(|q| q.id() == id)
+    }
+
+    pub fn unanswered_question_count(&self) -> usize {
         self.questions
             .iter()
             .filter(|question| !question.answered())
             .count()
     }
 
-    pub fn total_question_count(&mut self) -> usize {
+    pub fn total_question_count(&self) -> usize {
         self.questions.len()
     }
 }
@@ -160,31 +193,51 @@ pub enum QuestionPriority {
 
 #[derive(Serialize, Deserialize)]
 pub struct Question {
+    id: usize,
     content: String,
     priority: QuestionPriority,
     actions: Vec<ActionPoint>,
+    prereq: Option<usize>,
     answered: bool,
 }
 
 impl Question {
-    pub fn new(content: String, priority: QuestionPriority) -> Self {
+    pub(crate) fn new(
+        id: usize,
+        content: String,
+        priority: QuestionPriority,
+        prereq: Option<usize>,
+    ) -> Self {
         Self {
+            id,
             content,
             priority,
             actions: Vec::new(),
+            prereq,
             answered: false,
         }
+    }
+
+    pub fn id(&self) -> usize {
+        self.id
     }
 
     pub fn content(&self) -> &str {
         &self.content
     }
+
     pub fn priority(&self) -> &QuestionPriority {
         &self.priority
     }
+
     pub fn actions(&self) -> &[ActionPoint] {
         &self.actions
     }
+
+    pub fn prereq(&self) -> Option<usize> {
+        self.prereq
+    }
+
     pub fn answered(&self) -> bool {
         self.answered
     }
@@ -192,6 +245,7 @@ impl Question {
     pub fn total_time_required(&self) -> f32 {
         self.actions.iter().map(|action| action.required_time).sum()
     }
+
     pub fn remaining_time_needed(&self) -> f32 {
         self.actions
             .iter()
@@ -203,9 +257,15 @@ impl Question {
     pub fn set_content(&mut self, content: String) {
         self.content = content;
     }
+
     pub fn set_priority(&mut self, priority: QuestionPriority) {
         self.priority = priority;
     }
+
+    pub fn set_prereq(&mut self, prereq: Option<usize>) {
+        self.prereq = prereq;
+    }
+
     pub fn set_answered(&mut self, answered: bool) -> Result<(), QuestionError> {
         if answered {
             let remaining = self.incomplete_action_count();
@@ -216,24 +276,27 @@ impl Question {
         self.answered = answered;
         Ok(())
     }
+
     pub fn push_action(&mut self, action: ActionPoint) {
         self.actions.push(action);
     }
+
     pub fn remove_action(&mut self, idx: usize) -> ActionPoint {
         self.actions.remove(idx)
     }
+
     pub fn action_mut(&mut self, idx: usize) -> Option<&mut ActionPoint> {
         self.actions.get_mut(idx)
     }
 
-    pub fn incomplete_action_count(&mut self) -> usize {
+    pub fn incomplete_action_count(&self) -> usize {
         self.actions
             .iter()
             .filter(|action| !action.completed)
             .count()
     }
 
-    pub fn total_action_count(&mut self) -> usize {
+    pub fn total_action_count(&self) -> usize {
         self.actions.len()
     }
 }
@@ -284,12 +347,15 @@ impl ActionPoint {
     pub fn content(&self) -> &str {
         &self.content
     }
+
     pub fn category(&self) -> &ActionCategory {
         &self.category
     }
+
     pub fn required_time(&self) -> f32 {
         self.required_time
     }
+
     pub fn completed(&self) -> bool {
         self.completed
     }
@@ -297,12 +363,15 @@ impl ActionPoint {
     pub fn set_content(&mut self, content: String) {
         self.content = content;
     }
+
     pub fn set_category(&mut self, category: ActionCategory) {
         self.category = category;
     }
+
     pub fn set_required_time(&mut self, required_time: f32) {
         self.required_time = required_time.max(0.0);
     }
+
     pub fn set_completed(&mut self, completed: bool) {
         self.completed = completed;
     }
@@ -319,7 +388,7 @@ mod tests {
     }
 
     fn question_with(actions: Vec<ActionPoint>, answered: bool) -> Question {
-        let mut q = Question::new("q".to_string(), QuestionPriority::Medium);
+        let mut q = Question::new(0, "q".to_string(), QuestionPriority::Medium, None);
         for a in actions {
             q.push_action(a);
         }
@@ -395,15 +464,32 @@ mod tests {
 
     #[test]
     fn test_new_question_with_priority_initializes_empty() {
-        let q = Question::new("hello".into(), QuestionPriority::High);
+        let q = Question::new(0, "hello".into(), QuestionPriority::High, None);
+        assert_eq!(q.id(), 0);
         assert_eq!(q.content(), "hello");
         assert!(q.actions().is_empty());
+        assert_eq!(q.prereq(), None);
         assert!(!q.answered());
     }
 
     #[test]
+    fn test_new_question_with_prereq_stores_prereq() {
+        let q = Question::new(2, "q".into(), QuestionPriority::Medium, Some(1));
+        assert_eq!(q.prereq(), Some(1));
+    }
+
+    #[test]
+    fn test_set_prereq_when_called_updates_prereq() {
+        let mut q = Question::new(0, "q".into(), QuestionPriority::Low, None);
+        q.set_prereq(Some(5));
+        assert_eq!(q.prereq(), Some(5));
+        q.set_prereq(None);
+        assert_eq!(q.prereq(), None);
+    }
+
+    #[test]
     fn test_total_time_required_with_no_actions_returns_zero() {
-        let q = Question::new("q".into(), QuestionPriority::Low);
+        let q = Question::new(0, "q".into(), QuestionPriority::Low, None);
         assert_eq!(q.total_time_required(), 0.0);
     }
 
@@ -430,7 +516,7 @@ mod tests {
 
     #[test]
     fn test_push_action_when_called_appends_to_actions() {
-        let mut q = Question::new("q".into(), QuestionPriority::Low);
+        let mut q = Question::new(0, "q".into(), QuestionPriority::Low, None);
         q.push_action(action(1.0, false));
         assert_eq!(q.actions().len(), 1);
     }
@@ -451,7 +537,7 @@ mod tests {
 
     #[test]
     fn test_action_mut_with_out_of_bounds_returns_none() {
-        let mut q = Question::new("q".into(), QuestionPriority::Low);
+        let mut q = Question::new(0, "q".into(), QuestionPriority::Low, None);
         assert!(q.action_mut(0).is_none());
     }
 
@@ -464,14 +550,14 @@ mod tests {
 
     #[test]
     fn test_set_priority_when_called_updates_priority() {
-        let mut q = Question::new("q".into(), QuestionPriority::Low);
+        let mut q = Question::new(0, "q".into(), QuestionPriority::Low, None);
         q.set_priority(QuestionPriority::Critical);
         assert!(matches!(q.priority(), QuestionPriority::Critical));
     }
 
     #[test]
     fn test_set_answered_with_no_actions_returns_ok_and_updates_flag() {
-        let mut q = Question::new("q".into(), QuestionPriority::Low);
+        let mut q = Question::new(0, "q".into(), QuestionPriority::Low, None);
         assert!(q.set_answered(true).is_ok());
         assert!(q.answered());
     }
@@ -522,45 +608,72 @@ mod tests {
     #[test]
     fn test_total_allocated_timeframe_with_multiple_questions_sums_all() {
         let mut o = Objective::new("obj".into());
-        o.push_question(question_with(
-            vec![action(1.0, false), action(2.0, true)],
-            false,
-        ));
-        o.push_question(question_with(vec![action(0.5, true)], true));
+        let q0 = o.add_question("a".into(), QuestionPriority::Medium, None);
+        q0.push_action(action(1.0, false));
+        q0.push_action(action(2.0, true));
+        let q1 = o.add_question("b".into(), QuestionPriority::Medium, None);
+        q1.push_action(action(0.5, true));
+        q1.set_answered(true).unwrap();
         assert_eq!(o.total_allocated_timeframe(), 3.5);
     }
 
     #[test]
     fn test_remaining_time_needed_with_answered_question_excludes_it() {
         let mut o = Objective::new("obj".into());
-        o.push_question(question_with(vec![action(1.0, false)], false));
-        o.push_question(question_with(vec![action(5.0, true)], true));
+        let q0 = o.add_question("a".into(), QuestionPriority::Medium, None);
+        q0.push_action(action(1.0, false));
+        let q1 = o.add_question("b".into(), QuestionPriority::Medium, None);
+        q1.push_action(action(5.0, true));
+        q1.set_answered(true).unwrap();
         assert_eq!(o.remaining_time_needed(), 1.0);
     }
 
     #[test]
     fn test_remaining_time_needed_with_all_unanswered_sums_incomplete_actions() {
         let mut o = Objective::new("obj".into());
-        o.push_question(question_with(
-            vec![action(1.0, false), action(2.0, true)],
-            false,
-        ));
-        o.push_question(question_with(vec![action(3.0, false)], false));
+        let q0 = o.add_question("a".into(), QuestionPriority::Medium, None);
+        q0.push_action(action(1.0, false));
+        q0.push_action(action(2.0, true));
+        let q1 = o.add_question("b".into(), QuestionPriority::Medium, None);
+        q1.push_action(action(3.0, false));
         assert_eq!(o.remaining_time_needed(), 4.0);
     }
 
     #[test]
-    fn test_push_question_when_called_appends_to_questions() {
+    fn test_add_question_assigns_sequential_ids() {
         let mut o = Objective::new("obj".into());
-        o.push_question(Question::new("q".into(), QuestionPriority::Low));
-        assert_eq!(o.questions().len(), 1);
+        let id0 = o.add_question("a".into(), QuestionPriority::Low, None).id();
+        let id1 = o.add_question("b".into(), QuestionPriority::Low, None).id();
+        let id2 = o.add_question("c".into(), QuestionPriority::Low, None).id();
+        assert_eq!((id0, id1, id2), (0, 1, 2));
+        assert_eq!(o.questions().len(), 3);
+    }
+
+    #[test]
+    fn test_add_question_after_remove_does_not_reuse_id() {
+        let mut o = Objective::new("obj".into());
+        let id0 = o.add_question("a".into(), QuestionPriority::Low, None).id();
+        o.add_question("b".into(), QuestionPriority::Low, None);
+        o.remove_question(0);
+        let id_new = o.add_question("c".into(), QuestionPriority::Low, None).id();
+        assert_eq!(id0, 0);
+        assert_eq!(id_new, 2);
+    }
+
+    #[test]
+    fn test_question_by_id_returns_match() {
+        let mut o = Objective::new("obj".into());
+        o.add_question("a".into(), QuestionPriority::Low, None);
+        let id1 = o.add_question("b".into(), QuestionPriority::Low, None).id();
+        assert_eq!(o.question_by_id(id1).map(|q| q.content()), Some("b"));
+        assert!(o.question_by_id(999).is_none());
     }
 
     #[test]
     fn test_remove_question_with_valid_idx_returns_question_and_shrinks() {
         let mut o = Objective::new("obj".into());
-        o.push_question(Question::new("first".into(), QuestionPriority::Low));
-        o.push_question(Question::new("second".into(), QuestionPriority::High));
+        o.add_question("first".into(), QuestionPriority::Low, None);
+        o.add_question("second".into(), QuestionPriority::High, None);
         let removed = o.remove_question(0);
         assert_eq!(removed.content(), "first");
         assert_eq!(o.questions().len(), 1);
@@ -569,7 +682,7 @@ mod tests {
     #[test]
     fn test_question_mut_with_valid_idx_returns_some() {
         let mut o = Objective::new("obj".into());
-        o.push_question(Question::new("q".into(), QuestionPriority::Low));
+        o.add_question("q".into(), QuestionPriority::Low, None);
         assert!(o.question_mut(0).is_some());
     }
 
@@ -582,7 +695,7 @@ mod tests {
     #[test]
     fn test_question_mut_when_mutated_persists_changes() {
         let mut o = Objective::new("obj".into());
-        o.push_question(Question::new("q".into(), QuestionPriority::Low));
+        o.add_question("q".into(), QuestionPriority::Low, None);
         o.question_mut(0).unwrap().set_answered(true).unwrap();
         assert!(o.questions()[0].answered());
     }
@@ -597,8 +710,11 @@ mod tests {
     #[test]
     fn test_set_met_with_all_answered_returns_ok_and_updates_flag() {
         let mut o = Objective::new("obj".into());
-        o.push_question(question_with(vec![action(1.0, true)], true));
-        o.push_question(question_with(vec![], true));
+        let q0 = o.add_question("a".into(), QuestionPriority::Low, None);
+        q0.push_action(action(1.0, true));
+        q0.set_answered(true).unwrap();
+        let q1 = o.add_question("b".into(), QuestionPriority::Low, None);
+        q1.set_answered(true).unwrap();
         assert!(o.set_met(true).is_ok());
         assert!(o.met());
     }
@@ -606,8 +722,10 @@ mod tests {
     #[test]
     fn test_set_met_with_unanswered_questions_returns_unanswered_error() {
         let mut o = Objective::new("obj".into());
-        o.push_question(question_with(vec![action(1.0, true)], true));
-        o.push_question(Question::new("q".into(), QuestionPriority::Low));
+        let q0 = o.add_question("a".into(), QuestionPriority::Low, None);
+        q0.push_action(action(1.0, true));
+        q0.set_answered(true).unwrap();
+        o.add_question("b".into(), QuestionPriority::Low, None);
         assert_eq!(
             o.set_met(true),
             Err(ObjectiveError::UnansweredQuestion { remaining: 1 })
@@ -618,7 +736,7 @@ mod tests {
     #[test]
     fn test_set_met_to_false_with_unanswered_questions_returns_ok() {
         let mut o = Objective::new("obj".into());
-        o.push_question(Question::new("q".into(), QuestionPriority::Low));
+        o.add_question("q".into(), QuestionPriority::Low, None);
         assert!(o.set_met(false).is_ok());
         assert!(!o.met());
     }

@@ -7,9 +7,6 @@ edition = "2024"
 name = "smart_manager_core"
 path = "src/lib.rs"
 
-[[bin]]
-name = "smanager"
-path = "src/main.rs"
 
 [dependencies]
 comfy-table = "7.2.2"

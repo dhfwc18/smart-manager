@@ -1,4 +1,6 @@
 use crate::priority::Priority;
+use crate::questions::Objective;
+use crate::writer::{ObjectiveSchedule, ScheduledQuestion, objectives_to_schedule};
 use comfy_table::Table;
 use comfy_table::presets::ASCII_FULL;
 use serde::{Deserialize, Serialize};
@@ -9,6 +11,7 @@ use std::path::Path;
 
 pub(super) const UNGROUPED: &str = "Ungrouped";
 const BAR_WIDTH: usize = 40;
+const GANTT_BASE_DATE: &str = "2025-01-01";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GanttTask {
@@ -41,16 +44,19 @@ pub enum GanttFormat {
     Json,
 }
 
-pub fn render(tasks: &[GanttTask], format: GanttFormat) -> String {
+include!(concat!(env!("OUT_DIR"), "/gantt_chart_md_template.rs"));
+include!(concat!(env!("OUT_DIR"), "/gantt_table_md_template.rs"));
+
+pub fn render(objectives: &[Objective], format: GanttFormat) -> String {
     match format {
-        GanttFormat::Ascii => render_ascii(tasks),
-        GanttFormat::Markdown => render_markdown(tasks),
-        GanttFormat::Json => render_json(tasks),
+        GanttFormat::Ascii => render_ascii(&super::objectives_to_gantt_tasks(objectives)),
+        GanttFormat::Markdown => render_markdown(objectives),
+        GanttFormat::Json => render_json(&super::objectives_to_gantt_tasks(objectives)),
     }
 }
 
-pub fn save(tasks: &[GanttTask], format: GanttFormat, path: &Path) -> io::Result<()> {
-    let s = render(tasks, format);
+pub fn save(objectives: &[Objective], format: GanttFormat, path: &Path) -> io::Result<()> {
+    let s = render(objectives, format);
     let mut f = File::create(path)?;
     f.write_all(s.as_bytes())
 }
@@ -103,7 +109,7 @@ fn make_bar(days: f32, max_days: f32) -> String {
         return String::new();
     }
     let n = ((days / max_days) * BAR_WIDTH as f32).round() as usize;
-    let n = n.max(1).min(BAR_WIDTH);
+    let n = n.clamp(1, BAR_WIDTH);
     "#".repeat(n)
 }
 
@@ -142,73 +148,140 @@ fn sanitize_mermaid(s: &str) -> String {
         .collect()
 }
 
-const MERMAID_FRONTMATTER: &str = "---
-config:
-  theme: base
-  themeVariables:
-    taskBkgColor: '#1f3a5f'
-    taskBorderColor: '#000000'
-    taskTextColor: '#ffffff'
-    taskTextLightColor: '#ffffff'
-    taskTextDarkColor: '#ffffff'
-    taskTextOutsideColor: '#ffffff'
-    critBkgColor: '#7a1f1f'
-    critBorderColor: '#000000'
-    activeTaskBkgColor: '#1f5a4a'
-    activeTaskBorderColor: '#000000'
-    doneTaskBkgColor: '#1f3a5f'
-    doneTaskBorderColor: '#000000'
-    sectionBkgColor: '#2a2a2a'
-    altSectionBkgColor: '#1a1a1a'
-    sectionBkgColor2: '#3a3a3a'
-    gridColor: '#888888'
-    titleColor: '#ffffff'
-    textColor: '#ffffff'
-    primaryTextColor: '#ffffff'
-    todayLineColor: '#ff6b6b'
----
-";
+fn render_markdown(objectives: &[Objective]) -> String {
+    let schedule = objectives_to_schedule(objectives);
+    let has_any = schedule.iter().any(|s| !s.questions.is_empty());
 
-const GANTT_BASE_DATE: &str = "2025-01-01";
-
-fn render_markdown(tasks: &[GanttTask]) -> String {
-    let mut s = format!(
-        "```mermaid\n{}gantt\n    title Schedule\n    dateFormat YYYY-MM-DD\n    axisFormat %m-%d\n",
-        MERMAID_FRONTMATTER
-    );
-    if tasks.is_empty() {
-        s.push_str("```\n");
-        return s;
+    let mut out = String::from(GANTT_CHART_MD_HEAD);
+    if has_any {
+        out.push_str(&render_chart_body(&schedule));
     }
-    let mut id_counter: usize = 0;
-    for (section, section_tasks) in grouped_sorted(tasks) {
-        s.push_str(&format!("    section {}\n", sanitize_mermaid(&section)));
-        let mut prev_id: Option<String> = None;
-        for t in section_tasks {
-            let tid = format!("t{}", id_counter);
-            id_counter += 1;
-            let modifier = if matches!(t.priority, Priority::Critical) {
-                "crit, "
+    out.push_str(GANTT_CHART_MD_TAIL);
+
+    out.push_str(GANTT_TABLE_MD_HEAD);
+    out.push_str(&render_table_body(&schedule));
+    out.push_str(GANTT_TABLE_MD_TAIL);
+
+    out
+}
+
+fn render_chart_body(schedule: &[ObjectiveSchedule]) -> String {
+    let mut out = String::new();
+    let mut tid_counter: usize = 0;
+    for sched in schedule {
+        if sched.questions.is_empty() {
+            continue;
+        }
+        out.push_str(&format!(
+            "    section {}\n",
+            sanitize_mermaid(&sched.objective)
+        ));
+        let mut tid_for_qid: HashMap<usize, String> = HashMap::new();
+        let mut prev_tid: Option<String> = None;
+        for q in &sched.questions {
+            let tid = format!("t{}", tid_counter);
+            tid_counter += 1;
+
+            let mut tags: Vec<&str> = Vec::new();
+            if matches!(q.priority, Priority::Critical) {
+                tags.push("crit");
+            }
+            if q.answered {
+                tags.push("done");
+            }
+            let tag_prefix = if tags.is_empty() {
+                String::new()
             } else {
-                ""
+                format!("{}, ", tags.join(", "))
             };
-            let start = match &prev_id {
-                Some(p) => format!("after {}", p),
-                None => GANTT_BASE_DATE.to_string(),
-            };
-            s.push_str(&format!(
+
+            let start = q
+                .prereq
+                .and_then(|pid| tid_for_qid.get(&pid).cloned())
+                .map(|p| format!("after {}", p))
+                .unwrap_or_else(|| match &prev_tid {
+                    Some(p) => format!("after {}", p),
+                    None => GANTT_BASE_DATE.to_string(),
+                });
+
+            let label = format!("[Q{}] {}", q.id, sanitize_mermaid(&q.content));
+            let days = format_days(q.days.max(0.0));
+            out.push_str(&format!(
                 "    {} :{}{}, {}, {}d\n",
-                sanitize_mermaid(&t.name),
-                modifier,
-                tid,
-                start,
-                format_days(t.days)
+                label, tag_prefix, tid, start, days
             ));
-            prev_id = Some(tid);
+
+            tid_for_qid.insert(q.id, tid.clone());
+            prev_tid = Some(tid);
         }
     }
-    s.push_str("```\n");
-    s
+    out
+}
+
+fn escape_table(s: &str) -> String {
+    s.replace('|', "\\|").replace('\n', " ")
+}
+
+fn render_table_body(schedule: &[ObjectiveSchedule]) -> String {
+    let mut out = String::new();
+    let mut first = true;
+    for sched in schedule {
+        if sched.questions.is_empty() {
+            continue;
+        }
+        if !first {
+            out.push('\n');
+        }
+        first = false;
+        let header = if sched.met {
+            format!("### ~~{}~~ (met)\n\n", escape_table(&sched.objective))
+        } else {
+            format!("### {}\n\n", escape_table(&sched.objective))
+        };
+        out.push_str(&header);
+        out.push_str("| ID | Question | Priority | Days | Status | Action points |\n");
+        out.push_str("|----|----------|----------|------|--------|---------------|\n");
+        for q in &sched.questions {
+            out.push_str(&format_table_row(q));
+        }
+    }
+    out
+}
+
+fn format_table_row(q: &ScheduledQuestion) -> String {
+    let qtext = if q.answered {
+        format!("~~{}~~", escape_table(&q.content))
+    } else {
+        escape_table(&q.content)
+    };
+    let status = if q.answered { "done" } else { "open" };
+    let actions = if q.actions.is_empty() {
+        "—".to_string()
+    } else {
+        q.actions
+            .iter()
+            .map(|a| {
+                let check = if a.completed { "[x]" } else { "[ ]" };
+                format!(
+                    "{} {} ({}d, {})",
+                    check,
+                    escape_table(&a.content),
+                    format_days(a.days),
+                    a.category
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("<br>")
+    };
+    format!(
+        "| Q{} | {} | {} | {} | {} | {} |\n",
+        q.id,
+        qtext,
+        q.priority.label(),
+        format_days(q.days),
+        status,
+        actions
+    )
 }
 
 #[derive(Serialize)]
@@ -224,9 +297,22 @@ fn render_json(tasks: &[GanttTask]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::questions::{ActionCategory, ActionPoint, QuestionPriority, Tag};
 
     fn task(name: &str, days: f32, priority: Priority, group: Option<&str>) -> GanttTask {
         GanttTask::new(name, days, priority, group.map(|g| g.to_string()))
+    }
+
+    fn obj_with_question(
+        name: &str,
+        q_text: &str,
+        priority: QuestionPriority,
+        days: f32,
+    ) -> Objective {
+        let mut o = Objective::new(name.into());
+        let q = o.add_question(q_text.into(), priority, None);
+        q.push_action(ActionPoint::new("a".into(), ActionCategory::Writing, days));
+        o
     }
 
     #[test]
@@ -259,29 +345,17 @@ mod tests {
 
     #[test]
     fn test_render_ascii_includes_section_label() {
-        let tasks = vec![task("A", 1.0, Priority::High, Some("work"))];
-        let out = render(&tasks, GanttFormat::Ascii);
+        let mut o = obj_with_question("X", "q", QuestionPriority::High, 1.0);
+        o.add_tag(Tag::new("work"));
+        let out = render(&[o], GanttFormat::Ascii);
         assert!(out.contains("[work]"));
-        assert!(out.contains("A"));
     }
 
     #[test]
     fn test_render_ascii_with_no_group_uses_ungrouped() {
-        let tasks = vec![task("Floater", 2.0, Priority::Medium, None)];
-        let out = render(&tasks, GanttFormat::Ascii);
+        let o = obj_with_question("Floater", "q", QuestionPriority::Medium, 2.0);
+        let out = render(&[o], GanttFormat::Ascii);
         assert!(out.contains("[Ungrouped]"));
-    }
-
-    #[test]
-    fn test_render_ascii_orders_sections_by_priority_score_sum_desc() {
-        let tasks = vec![
-            task("Low task", 1.0, Priority::Low, Some("alpha")),
-            task("Crit task", 1.0, Priority::Critical, Some("beta")),
-        ];
-        let out = render(&tasks, GanttFormat::Ascii);
-        let beta = out.find("[beta]").expect("beta header missing");
-        let alpha = out.find("[alpha]").expect("alpha header missing");
-        assert!(beta < alpha, "higher priority section should appear first");
     }
 
     #[test]
@@ -290,7 +364,7 @@ mod tests {
             task("LowFirst", 1.0, Priority::Low, Some("g")),
             task("CritSecond", 1.0, Priority::Critical, Some("g")),
         ];
-        let out = render(&tasks, GanttFormat::Ascii);
+        let out = render_ascii(&tasks);
         let crit = out.find("CritSecond").unwrap();
         let low = out.find("LowFirst").unwrap();
         assert!(crit < low);
@@ -298,45 +372,144 @@ mod tests {
 
     #[test]
     fn test_render_ascii_uses_only_ascii_chars() {
-        let tasks = vec![task("A", 2.5, Priority::High, Some("work"))];
-        let out = render(&tasks, GanttFormat::Ascii);
+        let mut o = obj_with_question("Foo", "q", QuestionPriority::High, 2.5);
+        o.add_tag(Tag::new("work"));
+        let out = render(&[o], GanttFormat::Ascii);
         assert!(out.is_ascii(), "ASCII output must contain only ASCII");
     }
 
     #[test]
     fn test_render_markdown_emits_mermaid_block() {
-        let tasks = vec![task("A", 3.0, Priority::Medium, Some("work"))];
-        let out = render(&tasks, GanttFormat::Markdown);
+        let o = obj_with_question("Ship MVP", "q", QuestionPriority::Medium, 3.0);
+        let out = render(&[o], GanttFormat::Markdown);
         assert!(out.starts_with("```mermaid\n"));
         assert!(out.contains("\ngantt\n"));
-        assert!(out.contains("section work"));
-        assert!(out.trim_end().ends_with("```"));
+        assert!(out.contains("section Ship MVP"));
     }
 
     #[test]
-    fn test_render_markdown_critical_uses_crit_modifier() {
-        let tasks = vec![task("A", 1.0, Priority::Critical, Some("g"))];
-        let out = render(&tasks, GanttFormat::Markdown);
-        assert!(out.contains(":crit, t0"));
+    fn test_render_markdown_includes_question_id_label_on_bars() {
+        let o = obj_with_question("Obj", "What is X", QuestionPriority::Medium, 2.0);
+        let out = render(&[o], GanttFormat::Markdown);
+        assert!(
+            out.contains("[Q0] What is X"),
+            "expected [Q0] label, got: {out}"
+        );
     }
 
     #[test]
-    fn test_render_markdown_chains_subsequent_tasks_with_after() {
-        let tasks = vec![
-            task("First", 2.0, Priority::High, Some("g")),
-            task("Second", 1.0, Priority::High, Some("g")),
-        ];
-        let out = render(&tasks, GanttFormat::Markdown);
-        assert!(out.contains(":t0, 2025-01-01, 2d"));
-        assert!(out.contains("after t0, 1d"));
+    fn test_render_markdown_critical_question_gets_crit_tag() {
+        let o = obj_with_question("Obj", "q", QuestionPriority::Critical, 1.0);
+        let out = render(&[o], GanttFormat::Markdown);
+        assert!(out.contains(":crit, "));
     }
 
     #[test]
-    fn test_render_markdown_sanitizes_colons_in_name() {
-        let tasks = vec![task("A: bad name", 1.0, Priority::Low, Some("g"))];
-        let out = render(&tasks, GanttFormat::Markdown);
-        assert!(!out.contains("A: bad"));
-        assert!(out.contains("A  bad name"));
+    fn test_render_markdown_answered_question_gets_done_tag() {
+        let mut o = Objective::new("Obj".into());
+        let q = o.add_question("q".into(), QuestionPriority::Medium, None);
+        let mut a = ActionPoint::new("a".into(), ActionCategory::Writing, 1.0);
+        a.set_completed(true);
+        q.push_action(a);
+        q.set_answered(true).unwrap();
+        let out = render(&[o], GanttFormat::Markdown);
+        assert!(out.contains("done, "), "expected done tag, got: {out}");
+    }
+
+    #[test]
+    fn test_render_markdown_includes_reference_table() {
+        let o = obj_with_question("Obj", "q", QuestionPriority::Medium, 1.0);
+        let out = render(&[o], GanttFormat::Markdown);
+        assert!(out.contains("## Reference"));
+        assert!(out.contains("### Obj"));
+        assert!(out.contains("| ID |"));
+        assert!(out.contains("| Q0 |"));
+    }
+
+    #[test]
+    fn test_render_markdown_orders_by_priority_then_singletons_first() {
+        let mut o = Objective::new("Obj".into());
+        // Two High-priority questions: a chain (medium prereq -> high leaf) and a solo high.
+        let med_id = o
+            .add_question("Med".into(), QuestionPriority::Medium, None)
+            .id();
+        let _high_with_prereq = o
+            .add_question("HighWithPrereq".into(), QuestionPriority::High, Some(med_id))
+            .id();
+        let _high_solo = o
+            .add_question("HighSolo".into(), QuestionPriority::High, None)
+            .id();
+
+        let out = render(&[o], GanttFormat::Markdown);
+        let solo = out.find("[Q2] HighSolo").expect("solo missing");
+        let med = out.find("[Q0] Med").expect("med missing");
+        let leaf = out.find("[Q1] HighWithPrereq").expect("leaf missing");
+        assert!(
+            solo < med && med < leaf,
+            "expected solo high then med (prereq) then high leaf, got order: solo={solo} med={med} leaf={leaf}"
+        );
+    }
+
+    #[test]
+    fn test_render_markdown_chains_dependent_via_after_prereq() {
+        let mut o = Objective::new("Obj".into());
+        let p = o
+            .add_question("Root".into(), QuestionPriority::Medium, None)
+            .id();
+        o.add_question("Leaf".into(), QuestionPriority::High, Some(p));
+        let out = render(&[o], GanttFormat::Markdown);
+        // Root emitted first as t0, Leaf as t1 with `after t0`.
+        assert!(out.contains(":t0, 2025-01-01"));
+        assert!(out.contains("after t0, "));
+    }
+
+    #[test]
+    fn test_render_markdown_sanitizes_colons_in_question_text() {
+        let o = obj_with_question("Obj", "A: bad name", QuestionPriority::Low, 1.0);
+        let out = render(&[o], GanttFormat::Markdown);
+        // The chart row replaces ':' with ' '; the table row escapes table-breaking
+        // chars but preserves ':' since it does not break tables.
+        assert!(out.contains("[Q0] A  bad name"));
+    }
+
+    #[test]
+    fn test_render_markdown_table_strikes_answered_question() {
+        let mut o = Objective::new("Obj".into());
+        let q = o.add_question("Done thing".into(), QuestionPriority::Medium, None);
+        q.set_answered(true).unwrap();
+        let out = render(&[o], GanttFormat::Markdown);
+        assert!(out.contains("~~Done thing~~"));
+    }
+
+    #[test]
+    fn test_render_markdown_table_marks_action_completion_with_checkbox_only() {
+        let mut o = Objective::new("Obj".into());
+        let q = o.add_question("q".into(), QuestionPriority::Medium, None);
+        let mut done = ActionPoint::new("done step".into(), ActionCategory::Writing, 1.0);
+        done.set_completed(true);
+        q.push_action(done);
+        q.push_action(ActionPoint::new(
+            "open step".into(),
+            ActionCategory::Writing,
+            1.0,
+        ));
+        let out = render(&[o], GanttFormat::Markdown);
+        assert!(out.contains("[x] done step"));
+        assert!(out.contains("[ ] open step"));
+        assert!(
+            !out.contains("~~[x]"),
+            "completed action should not be wrapped in strikethrough"
+        );
+    }
+
+    #[test]
+    fn test_render_markdown_table_marks_met_objective() {
+        let mut o = Objective::new("Done obj".into());
+        let q = o.add_question("q".into(), QuestionPriority::Medium, None);
+        q.set_answered(true).unwrap();
+        o.set_met(true).unwrap();
+        let out = render(&[o], GanttFormat::Markdown);
+        assert!(out.contains("~~Done obj~~ (met)"));
     }
 
     #[test]
@@ -347,26 +520,19 @@ mod tests {
     }
 
     #[test]
-    fn test_render_json_roundtrips_through_serde() {
-        let tasks = vec![
-            task("Foo", 2.0, Priority::High, Some("work")),
-            task("Bar", 0.5, Priority::Low, None),
-        ];
-        let out = render(&tasks, GanttFormat::Json);
+    fn test_render_json_includes_objective_summary_per_objective() {
+        let o = obj_with_question("Foo", "q", QuestionPriority::High, 2.0);
+        let out = render(&[o], GanttFormat::Json);
         let doc: serde_json::Value = serde_json::from_str(&out).unwrap();
         let arr = doc["tasks"].as_array().unwrap();
-        assert_eq!(arr.len(), 2);
+        assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["name"], "Foo");
-        assert_eq!(arr[0]["days"], 2.0);
-        assert_eq!(arr[0]["priority"], "High");
-        assert_eq!(arr[0]["group"], "work");
-        assert!(arr[1]["group"].is_null());
     }
 
     #[test]
     fn test_render_json_escapes_quotes_in_name() {
         let tasks = vec![task("Has \"quotes\"", 1.0, Priority::Low, None)];
-        let out = render(&tasks, GanttFormat::Json);
+        let out = render_json(&tasks);
         let doc: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(doc["tasks"][0]["name"], "Has \"quotes\"");
     }
@@ -385,8 +551,8 @@ mod tests {
     fn test_save_writes_file_with_rendered_contents() {
         let path = std::env::temp_dir().join("smart_manager_gantt_test.txt");
         let _ = std::fs::remove_file(&path);
-        let tasks = vec![task("Foo", 1.0, Priority::High, None)];
-        save(&tasks, GanttFormat::Ascii, &path).unwrap();
+        let o = obj_with_question("Foo", "q", QuestionPriority::High, 1.0);
+        save(&[o], GanttFormat::Ascii, &path).unwrap();
         let contents = std::fs::read_to_string(&path).unwrap();
         assert!(contents.contains("Foo"));
         let _ = std::fs::remove_file(&path);

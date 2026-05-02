@@ -1,4 +1,4 @@
-use crate::questions::{Objective, ObjectiveError, Question, QuestionError, Tag};
+use crate::questions::{Objective, ObjectiveError, Question, QuestionError, QuestionPriority, Tag};
 use crate::writer::gantt::{self, GanttFormat, GanttTask};
 use crate::writer::objectives_to_gantt_tasks;
 use crate::writer::todo::{self, TodoFormat};
@@ -82,6 +82,23 @@ pub enum ValidationIssue {
         obj_idx: usize,
         name: String,
     },
+    DuplicateQuestionId {
+        obj_idx: usize,
+        id: usize,
+    },
+    UnknownPrereq {
+        obj_idx: usize,
+        q_idx: usize,
+        prereq_id: usize,
+    },
+    SelfPrereq {
+        obj_idx: usize,
+        q_idx: usize,
+    },
+    PrereqCycle {
+        obj_idx: usize,
+        q_idx: usize,
+    },
 }
 
 impl std::fmt::Display for ValidationIssue {
@@ -110,6 +127,25 @@ impl std::fmt::Display for ValidationIssue {
             Self::DuplicateTag { obj_idx, name } => {
                 write!(f, "objective {obj_idx} has duplicate tag {name:?}")
             }
+            Self::DuplicateQuestionId { obj_idx, id } => {
+                write!(f, "objective {obj_idx} has duplicate question id {id}")
+            }
+            Self::UnknownPrereq {
+                obj_idx,
+                q_idx,
+                prereq_id,
+            } => write!(
+                f,
+                "objective {obj_idx} question {q_idx}: prereq id {prereq_id} not found"
+            ),
+            Self::SelfPrereq { obj_idx, q_idx } => write!(
+                f,
+                "objective {obj_idx} question {q_idx}: prereq references itself"
+            ),
+            Self::PrereqCycle { obj_idx, q_idx } => write!(
+                f,
+                "objective {obj_idx} question {q_idx}: prereq chain forms a cycle"
+            ),
         }
     }
 }
@@ -143,19 +179,22 @@ impl App {
     pub fn push_objective(&mut self, objective: Objective) {
         self.objectives.push(objective);
     }
+
     pub fn remove_objective(&mut self, idx: usize) -> Objective {
         self.objectives.remove(idx)
     }
 
-    pub fn push_question(
+    pub fn add_question(
         &mut self,
         objective_idx: usize,
-        question: Question,
-    ) -> Result<(), AppError> {
-        self.objective_mut(objective_idx)
-            .ok_or(AppError::NotFound)?
-            .push_question(question);
-        Ok(())
+        content: String,
+        priority: QuestionPriority,
+        prereq: Option<usize>,
+    ) -> Result<usize, AppError> {
+        let objective = self
+            .objective_mut(objective_idx)
+            .ok_or(AppError::NotFound)?;
+        Ok(objective.add_question(content, priority, prereq).id())
     }
 
     pub fn add_tag(&mut self, objective_idx: usize, tag: Tag) -> Result<bool, AppError> {
@@ -164,6 +203,7 @@ impl App {
             .ok_or(AppError::NotFound)?
             .add_tag(tag))
     }
+
     pub fn remove_tag(
         &mut self,
         objective_idx: usize,
@@ -197,6 +237,7 @@ impl App {
             .map(|o| o.total_allocated_timeframe())
             .sum()
     }
+
     pub fn remaining_time_needed(&self) -> f32 {
         self.objectives
             .iter()
@@ -240,47 +281,10 @@ impl App {
     pub fn validate(&self) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
         for (oi, o) in self.objectives.iter().enumerate() {
-            let mut seen: Vec<&str> = Vec::new();
-            for t in o.tags() {
-                if seen.contains(&t.name()) {
-                    issues.push(ValidationIssue::DuplicateTag {
-                        obj_idx: oi,
-                        name: t.name().to_string(),
-                    });
-                } else {
-                    seen.push(t.name());
-                }
-            }
-            if o.met() {
-                let unanswered = o.questions().iter().filter(|q| !q.answered()).count();
-                if unanswered > 0 {
-                    issues.push(ValidationIssue::MetObjectiveWithUnansweredQuestions {
-                        obj_idx: oi,
-                        remaining: unanswered,
-                    });
-                }
-            }
-            for (qi, q) in o.questions().iter().enumerate() {
-                if q.answered() {
-                    let incomplete = q.actions().iter().filter(|a| !a.completed()).count();
-                    if incomplete > 0 {
-                        issues.push(ValidationIssue::AnsweredQuestionWithIncompleteActions {
-                            obj_idx: oi,
-                            q_idx: qi,
-                            remaining: incomplete,
-                        });
-                    }
-                }
-                for (ai, a) in q.actions().iter().enumerate() {
-                    if a.required_time() < 0.0 {
-                        issues.push(ValidationIssue::NegativeRequiredTime {
-                            obj_idx: oi,
-                            q_idx: qi,
-                            action_idx: ai,
-                        });
-                    }
-                }
-            }
+            validate_tags(oi, o, &mut issues);
+            validate_met(oi, o, &mut issues);
+            validate_questions(oi, o, &mut issues);
+            validate_prereqs(oi, o, &mut issues);
         }
         issues
     }
@@ -290,20 +294,131 @@ impl App {
     }
 
     pub fn render_gantt(&self, format: GanttFormat) -> String {
-        gantt::render(&self.gantt_tasks(), format)
+        gantt::render(&self.objectives, format)
     }
 
     pub fn save_gantt(&self, format: GanttFormat, path: &Path) -> std::io::Result<()> {
-        gantt::save(&self.gantt_tasks(), format, path)
+        gantt::save(&self.objectives, format, path)
     }
 
     pub fn render_todo(&self, format: TodoFormat) -> String {
-        todo::render(&self.gantt_tasks(), format)
+        todo::render(&self.objectives, format)
     }
 
     pub fn save_todo(&self, format: TodoFormat, path: &Path) -> std::io::Result<()> {
-        todo::save(&self.gantt_tasks(), format, path)
+        todo::save(&self.objectives, format, path)
     }
+}
+
+fn validate_tags(oi: usize, o: &Objective, issues: &mut Vec<ValidationIssue>) {
+    let mut seen: Vec<&str> = Vec::new();
+    for t in o.tags() {
+        if seen.contains(&t.name()) {
+            issues.push(ValidationIssue::DuplicateTag {
+                obj_idx: oi,
+                name: t.name().to_string(),
+            });
+        } else {
+            seen.push(t.name());
+        }
+    }
+}
+
+fn validate_met(oi: usize, o: &Objective, issues: &mut Vec<ValidationIssue>) {
+    if !o.met() {
+        return;
+    }
+    let unanswered = o.questions().iter().filter(|q| !q.answered()).count();
+    if unanswered > 0 {
+        issues.push(ValidationIssue::MetObjectiveWithUnansweredQuestions {
+            obj_idx: oi,
+            remaining: unanswered,
+        });
+    }
+}
+
+fn validate_questions(oi: usize, o: &Objective, issues: &mut Vec<ValidationIssue>) {
+    for (qi, q) in o.questions().iter().enumerate() {
+        if q.answered() {
+            let incomplete = q.actions().iter().filter(|a| !a.completed()).count();
+            if incomplete > 0 {
+                issues.push(ValidationIssue::AnsweredQuestionWithIncompleteActions {
+                    obj_idx: oi,
+                    q_idx: qi,
+                    remaining: incomplete,
+                });
+            }
+        }
+        for (ai, a) in q.actions().iter().enumerate() {
+            if a.required_time() < 0.0 {
+                issues.push(ValidationIssue::NegativeRequiredTime {
+                    obj_idx: oi,
+                    q_idx: qi,
+                    action_idx: ai,
+                });
+            }
+        }
+    }
+}
+
+fn validate_prereqs(oi: usize, o: &Objective, issues: &mut Vec<ValidationIssue>) {
+    let questions = o.questions();
+    let mut seen_ids: Vec<usize> = Vec::with_capacity(questions.len());
+    for q in questions {
+        if seen_ids.contains(&q.id()) {
+            issues.push(ValidationIssue::DuplicateQuestionId {
+                obj_idx: oi,
+                id: q.id(),
+            });
+        } else {
+            seen_ids.push(q.id());
+        }
+    }
+
+    for (qi, q) in questions.iter().enumerate() {
+        let Some(prereq_id) = q.prereq() else {
+            continue;
+        };
+        if prereq_id == q.id() {
+            issues.push(ValidationIssue::SelfPrereq {
+                obj_idx: oi,
+                q_idx: qi,
+            });
+            continue;
+        }
+        if o.question_by_id(prereq_id).is_none() {
+            issues.push(ValidationIssue::UnknownPrereq {
+                obj_idx: oi,
+                q_idx: qi,
+                prereq_id,
+            });
+            continue;
+        }
+        if prereq_chain_returns_to(qi, questions) {
+            issues.push(ValidationIssue::PrereqCycle {
+                obj_idx: oi,
+                q_idx: qi,
+            });
+        }
+    }
+}
+
+fn prereq_chain_returns_to(start_idx: usize, questions: &[Question]) -> bool {
+    let start_id = questions[start_idx].id();
+    let mut cursor_idx = start_idx;
+    for _ in 0..questions.len() {
+        let Some(prereq_id) = questions[cursor_idx].prereq() else {
+            return false;
+        };
+        let Some(next_idx) = questions.iter().position(|q| q.id() == prereq_id) else {
+            return false;
+        };
+        if questions[next_idx].id() == start_id {
+            return true;
+        }
+        cursor_idx = next_idx;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -313,11 +428,10 @@ mod tests {
 
     fn objective_with_action(content: &str, time: f32, completed: bool) -> Objective {
         let mut o = Objective::new(content.into());
-        let mut q = Question::new("q".into(), QuestionPriority::Medium);
+        let q = o.add_question("q".into(), QuestionPriority::Medium, None);
         let mut a = ActionPoint::new("a".into(), ActionCategory::Writing, time);
         a.set_completed(completed);
         q.push_action(a);
-        o.push_question(q);
         o
     }
 
@@ -335,21 +449,37 @@ mod tests {
     }
 
     #[test]
-    fn test_push_question_with_invalid_idx_returns_not_found() {
+    fn test_add_question_with_invalid_idx_returns_not_found() {
         let mut app = App::new();
         assert_eq!(
-            app.push_question(0, Question::new("q".into(), QuestionPriority::Low)),
+            app.add_question(0, "q".into(), QuestionPriority::Low, None),
             Err(AppError::NotFound)
         );
     }
 
     #[test]
-    fn test_push_question_with_valid_idx_appends() {
+    fn test_add_question_with_valid_idx_appends_and_returns_id() {
         let mut app = App::new();
         app.push_objective(Objective::new("o".into()));
-        app.push_question(0, Question::new("q".into(), QuestionPriority::Low))
+        let id = app
+            .add_question(0, "q".into(), QuestionPriority::Low, None)
             .unwrap();
+        assert_eq!(id, 0);
         assert_eq!(app.objectives()[0].questions().len(), 1);
+    }
+
+    #[test]
+    fn test_add_question_assigns_increasing_ids() {
+        let mut app = App::new();
+        app.push_objective(Objective::new("o".into()));
+        let id0 = app
+            .add_question(0, "a".into(), QuestionPriority::Low, None)
+            .unwrap();
+        let id1 = app
+            .add_question(0, "b".into(), QuestionPriority::Low, Some(id0))
+            .unwrap();
+        assert_eq!((id0, id1), (0, 1));
+        assert_eq!(app.objectives()[0].questions()[1].prereq(), Some(0));
     }
 
     #[test]
@@ -415,7 +545,7 @@ mod tests {
         app.push_objective(objective_with_action("b", 2.0, true));
         app.add_tag(0, Tag::new("work")).unwrap();
         app.add_tag(1, Tag::new("home")).unwrap();
-        app.push_question(0, Question::new("q2".into(), QuestionPriority::High))
+        app.add_question(0, "q2".into(), QuestionPriority::High, None)
             .unwrap();
         app
     }
@@ -512,7 +642,7 @@ mod tests {
 
     #[test]
     fn test_validate_with_negative_required_time_reports_issue() {
-        let json = r#"{"objectives":[{"content":"x","questions":[{"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":-5.0,"completed":false}],"answered":false}],"tags":[],"met":false}]}"#;
+        let json = r#"{"objectives":[{"content":"x","questions":[{"id":0,"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":-5.0,"completed":false}],"prereq":null,"answered":false}],"tags":[],"met":false,"next_question_id":1}]}"#;
         let app = App::from_json(json).unwrap();
         let issues = app.validate();
         assert_eq!(issues.len(), 1);
@@ -528,7 +658,7 @@ mod tests {
 
     #[test]
     fn test_validate_with_answered_question_having_incomplete_actions_reports_issue() {
-        let json = r#"{"objectives":[{"content":"x","questions":[{"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":1.0,"completed":false}],"answered":true}],"tags":[],"met":false}]}"#;
+        let json = r#"{"objectives":[{"content":"x","questions":[{"id":0,"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":1.0,"completed":false}],"prereq":null,"answered":true}],"tags":[],"met":false,"next_question_id":1}]}"#;
         let app = App::from_json(json).unwrap();
         let issues = app.validate();
         assert!(matches!(
@@ -543,7 +673,7 @@ mod tests {
 
     #[test]
     fn test_validate_with_met_objective_having_unanswered_questions_reports_issue() {
-        let json = r#"{"objectives":[{"content":"x","questions":[{"content":"q","priority":"Medium","actions":[],"answered":false}],"tags":[],"met":true}]}"#;
+        let json = r#"{"objectives":[{"content":"x","questions":[{"id":0,"content":"q","priority":"Medium","actions":[],"prereq":null,"answered":false}],"tags":[],"met":true,"next_question_id":1}]}"#;
         let app = App::from_json(json).unwrap();
         let issues = app.validate();
         assert!(matches!(
@@ -557,8 +687,7 @@ mod tests {
 
     #[test]
     fn test_validate_with_duplicate_tags_reports_issue() {
-        let json =
-            r#"{"objectives":[{"content":"x","questions":[],"tags":["work","work"],"met":false}]}"#;
+        let json = r#"{"objectives":[{"content":"x","questions":[],"tags":["work","work"],"met":false,"next_question_id":0}]}"#;
         let app = App::from_json(json).unwrap();
         let issues = app.validate();
         assert_eq!(issues.len(), 1);
@@ -569,10 +698,94 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_with_duplicate_question_id_reports_issue() {
+        let json = r#"{"objectives":[{"content":"x","questions":[
+            {"id":1,"content":"a","priority":"Medium","actions":[],"prereq":null,"answered":false},
+            {"id":1,"content":"b","priority":"Medium","actions":[],"prereq":null,"answered":false}
+        ],"tags":[],"met":false,"next_question_id":2}]}"#;
+        let app = App::from_json(json).unwrap();
+        let issues = app.validate();
+        assert!(matches!(
+            issues[0],
+            ValidationIssue::DuplicateQuestionId { obj_idx: 0, id: 1 }
+        ));
+    }
+
+    #[test]
+    fn test_validate_with_unknown_prereq_reports_issue() {
+        let json = r#"{"objectives":[{"content":"x","questions":[
+            {"id":0,"content":"a","priority":"Medium","actions":[],"prereq":99,"answered":false}
+        ],"tags":[],"met":false,"next_question_id":1}]}"#;
+        let app = App::from_json(json).unwrap();
+        let issues = app.validate();
+        assert!(matches!(
+            issues[0],
+            ValidationIssue::UnknownPrereq {
+                obj_idx: 0,
+                q_idx: 0,
+                prereq_id: 99
+            }
+        ));
+    }
+
+    #[test]
+    fn test_validate_with_self_prereq_reports_issue() {
+        let json = r#"{"objectives":[{"content":"x","questions":[
+            {"id":7,"content":"a","priority":"Medium","actions":[],"prereq":7,"answered":false}
+        ],"tags":[],"met":false,"next_question_id":8}]}"#;
+        let app = App::from_json(json).unwrap();
+        let issues = app.validate();
+        assert!(matches!(
+            issues[0],
+            ValidationIssue::SelfPrereq {
+                obj_idx: 0,
+                q_idx: 0
+            }
+        ));
+    }
+
+    #[test]
+    fn test_validate_with_prereq_cycle_reports_issue() {
+        // a -> b -> a
+        let json = r#"{"objectives":[{"content":"x","questions":[
+            {"id":0,"content":"a","priority":"Medium","actions":[],"prereq":1,"answered":false},
+            {"id":1,"content":"b","priority":"Medium","actions":[],"prereq":0,"answered":false}
+        ],"tags":[],"met":false,"next_question_id":2}]}"#;
+        let app = App::from_json(json).unwrap();
+        let issues = app.validate();
+        let cycles: Vec<_> = issues
+            .iter()
+            .filter(|i| matches!(i, ValidationIssue::PrereqCycle { .. }))
+            .collect();
+        assert_eq!(cycles.len(), 2);
+    }
+
+    #[test]
+    fn test_validate_allows_answered_question_with_unanswered_prereq() {
+        let json = r#"{"objectives":[{"content":"x","questions":[
+            {"id":0,"content":"a","priority":"Medium","actions":[],"prereq":null,"answered":false},
+            {"id":1,"content":"b","priority":"Medium","actions":[],"prereq":0,"answered":true}
+        ],"tags":[],"met":false,"next_question_id":2}]}"#;
+        let app = App::from_json(json).unwrap();
+        assert!(app.validate().is_empty());
+    }
+
+    #[test]
+    fn test_validate_with_valid_prereq_chain_reports_no_issue() {
+        let json = r#"{"objectives":[{"content":"x","questions":[
+            {"id":0,"content":"a","priority":"Medium","actions":[],"prereq":null,"answered":false},
+            {"id":1,"content":"b","priority":"Medium","actions":[],"prereq":0,"answered":false},
+            {"id":2,"content":"c","priority":"Medium","actions":[],"prereq":1,"answered":false}
+        ],"tags":[],"met":false,"next_question_id":3}]}"#;
+        let app = App::from_json(json).unwrap();
+        assert!(app.validate().is_empty());
+    }
+
+    #[test]
     fn test_validate_collects_all_issues() {
         let json = r#"{"objectives":[
-            {"content":"a","questions":[{"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":-1.0,"completed":false}],"answered":true}],"tags":["x","x"],"met":false},
-            {"content":"b","questions":[{"content":"q","priority":"Medium","actions":[],"answered":false}],"tags":[],"met":true}
+            {"content":"a","questions":[{"id":0,"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":-1.0,"completed":false}],"prereq":null,"answered":true}],"tags":["x","x"],"met":false,"next_question_id":1},
+            {"content":"b","questions":[{"id":0,"content":"q","priority":"Medium","actions":[],"prereq":null,"answered":false}],"tags":[],"met":true,"next_question_id":1}
         ]}"#;
         let app = App::from_json(json).unwrap();
         let issues = app.validate();
@@ -584,7 +797,7 @@ mod tests {
         let path = std::env::temp_dir().join("smart_manager_app_invalid.json");
         std::fs::write(
             &path,
-            r#"{"objectives":[{"content":"x","questions":[{"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":-5.0,"completed":false}],"answered":false}],"tags":[],"met":false}]}"#,
+            r#"{"objectives":[{"content":"x","questions":[{"id":0,"content":"q","priority":"Medium","actions":[{"content":"a","category":"Writing","required_time":-5.0,"completed":false}],"prereq":null,"answered":false}],"tags":[],"met":false,"next_question_id":1}]}"#,
         )
         .unwrap();
         let err = App::load(&path).err().expect("load should fail");

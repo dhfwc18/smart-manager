@@ -24,9 +24,24 @@
                 list-style: none;
                 padding-left: 0;
             }
+            ul ul {
+                padding-left: 1.5em;
+                margin: 0.2em 0 0.6em 0;
+            }
             li {
                 padding: 0.3em 0;
                 border-bottom: 1px solid #eee;
+            }
+            li li {
+                border-bottom: none;
+                padding: 0.15em 0;
+                font-size: 0.95em;
+                color: #444;
+            }
+            @media (prefers-color-scheme: dark) {
+                li li {
+                    color: #ccc;
+                }
             }
             input[type="checkbox"] {
                 margin-right: 0.5em;
@@ -81,7 +96,7 @@
         </style>
     </head>
     <body>
-        <h1>TODO</h1>
+        <h1>TODOs</h1>
         <!-- BODY -->
     </body>
 </html>
