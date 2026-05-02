@@ -71,12 +71,12 @@ fn pick_group(o: &Objective, scores: &HashMap<String, u32>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::questions::{Question, QuestionPriority, Tag};
+    use crate::questions::{QuestionPriority, Tag};
 
     fn objective(content: &str, priorities: Vec<QuestionPriority>, tags: &[&str]) -> Objective {
         let mut o = Objective::new(content.into());
         for p in priorities {
-            o.push_question(Question::new("q".into(), p));
+            o.add_question("q".into(), p, None);
         }
         for t in tags {
             o.add_tag(Tag::new(*t));

@@ -103,7 +103,7 @@ fn make_bar(days: f32, max_days: f32) -> String {
         return String::new();
     }
     let n = ((days / max_days) * BAR_WIDTH as f32).round() as usize;
-    let n = n.max(1).min(BAR_WIDTH);
+    let n = n.clamp(1, BAR_WIDTH);
     "#".repeat(n)
 }
 
