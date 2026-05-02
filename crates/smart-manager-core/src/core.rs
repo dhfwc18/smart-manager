@@ -1,4 +1,7 @@
 use crate::questions::{Objective, ObjectiveError, Question, QuestionError, Tag};
+use crate::writer::gantt::{self, GanttFormat, GanttTask};
+use crate::writer::objectives_to_gantt_tasks;
+use crate::writer::todo::{self, TodoFormat};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -281,6 +284,26 @@ impl App {
         }
         issues
     }
+
+    pub fn gantt_tasks(&self) -> Vec<GanttTask> {
+        objectives_to_gantt_tasks(&self.objectives)
+    }
+
+    pub fn render_gantt(&self, format: GanttFormat) -> String {
+        gantt::render(&self.gantt_tasks(), format)
+    }
+
+    pub fn save_gantt(&self, format: GanttFormat, path: &Path) -> std::io::Result<()> {
+        gantt::save(&self.gantt_tasks(), format, path)
+    }
+
+    pub fn render_todo(&self, format: TodoFormat) -> String {
+        todo::render(&self.gantt_tasks(), format)
+    }
+
+    pub fn save_todo(&self, format: TodoFormat, path: &Path) -> std::io::Result<()> {
+        todo::save(&self.gantt_tasks(), format, path)
+    }
 }
 
 #[cfg(test)]
@@ -450,6 +473,35 @@ mod tests {
     #[test]
     fn test_from_json_with_invalid_json_returns_error() {
         assert!(App::from_json("{ not json").is_err());
+    }
+
+    #[test]
+    fn test_render_gantt_ascii_includes_objective_content() {
+        let mut app = App::new();
+        app.push_objective(objective_with_action("Foo", 2.0, false));
+        let out = app.render_gantt(GanttFormat::Ascii);
+        assert!(out.contains("Foo"));
+    }
+
+    #[test]
+    fn test_render_todo_markdown_includes_checkbox_for_objective() {
+        let mut app = App::new();
+        app.push_objective(objective_with_action("Foo", 1.0, false));
+        let out = app.render_todo(TodoFormat::Markdown);
+        assert!(out.contains("- [ ]"));
+        assert!(out.contains("Foo"));
+    }
+
+    #[test]
+    fn test_save_gantt_writes_file_with_rendered_contents() {
+        let path = std::env::temp_dir().join("smart_manager_app_gantt_test.md");
+        let _ = std::fs::remove_file(&path);
+        let mut app = App::new();
+        app.push_objective(objective_with_action("Foo", 1.0, false));
+        app.save_gantt(GanttFormat::Markdown, &path).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("Foo"));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
