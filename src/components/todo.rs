@@ -1,13 +1,11 @@
 use dioxus::prelude::*;
 
-use crate::app::AppState;
-use crate::models::{Objective, Question};
+use crate::app::{ACTION_CATEGORIES, ActionView, AppState, ObjectiveView, QuestionView};
 
 #[component]
 pub fn TodoView() -> Element {
     let state = use_context::<AppState>();
-    let objectives = state.objectives;
-    let snapshot = objectives.read().clone();
+    let snapshot = state.view.read().clone();
 
     rsx! {
         section { class: "todo-view",
@@ -28,11 +26,11 @@ pub fn TodoView() -> Element {
 }
 
 #[component]
-fn ObjectiveBlock(index: usize, obj: Objective) -> Element {
+fn ObjectiveBlock(index: usize, obj: ObjectiveView) -> Element {
     let mut state = use_context::<AppState>();
-    let met = obj.met();
-    let questions = obj.questions().to_vec();
-    let tags: Vec<String> = obj.tags().iter().map(|t| t.name().to_string()).collect();
+    let met = obj.met;
+    let tags = obj.tags.clone();
+    let questions = obj.questions.clone();
 
     rsx! {
         article { class: if met { "objective done" } else { "objective" },
@@ -40,9 +38,13 @@ fn ObjectiveBlock(index: usize, obj: Objective) -> Element {
                 input {
                     r#type: "checkbox",
                     checked: met,
-                    onchange: move |_| state.toggle_objective(index),
+                    onclick: move |e| {
+                        if state.toggle_objective(index).is_err() {
+                            e.prevent_default();
+                        }
+                    },
                 }
-                span { class: "objective-title", "{obj.content()}" }
+                span { class: "objective-title", "{obj.content}" }
                 div { class: "tag-list",
                     for tag in tags.iter().cloned() {
                         TagChip { obj_index: index, name: tag }
@@ -51,8 +53,8 @@ fn ObjectiveBlock(index: usize, obj: Objective) -> Element {
                 }
             }
             div { class: "question-list",
-                for (qi, question) in questions.into_iter().enumerate() {
-                    QuestionBlock { key: "{qi}", obj_index: index, q_index: qi, question }
+                for (qi, q) in questions.into_iter().enumerate() {
+                    QuestionBlock { key: "{qi}", obj_index: index, q_index: qi, q }
                 }
                 AddQuestionInput { obj_index: index }
             }
@@ -61,11 +63,11 @@ fn ObjectiveBlock(index: usize, obj: Objective) -> Element {
 }
 
 #[component]
-fn QuestionBlock(obj_index: usize, q_index: usize, question: Question) -> Element {
+fn QuestionBlock(obj_index: usize, q_index: usize, q: QuestionView) -> Element {
     let mut state = use_context::<AppState>();
-    let answered = question.answered();
-    let priority = question.priority().as_str().to_string();
-    let actions = question.actions().to_vec();
+    let answered = q.answered;
+    let priority = q.priority.clone();
+    let actions = q.actions.clone();
 
     rsx! {
         div { class: if answered { "question done" } else { "question" },
@@ -73,22 +75,23 @@ fn QuestionBlock(obj_index: usize, q_index: usize, question: Question) -> Elemen
                 input {
                     r#type: "checkbox",
                     checked: answered,
-                    onchange: move |_| state.toggle_question(obj_index, q_index),
+                    onclick: move |e| {
+                        if state.toggle_question(obj_index, q_index).is_err() {
+                            e.prevent_default();
+                        }
+                    },
                 }
-                span { class: "question-title", "{question.content()}" }
+                span { class: "question-title", "{q.content}" }
                 span { class: "priority priority-{priority}", "{priority}" }
             }
             div { class: "action-list",
-                for (ai, action) in actions.into_iter().enumerate() {
+                for (ai, a) in actions.into_iter().enumerate() {
                     ActionRow {
                         key: "{ai}",
                         obj_index,
                         q_index,
                         a_index: ai,
-                        title: action.content().to_string(),
-                        category: action.category().as_str().to_string(),
-                        required_time: action.required_time(),
-                        completed: action.completed(),
+                        action: a,
                     }
                 }
                 AddActionInput { obj_index, q_index }
@@ -98,16 +101,9 @@ fn QuestionBlock(obj_index: usize, q_index: usize, question: Question) -> Elemen
 }
 
 #[component]
-fn ActionRow(
-    obj_index: usize,
-    q_index: usize,
-    a_index: usize,
-    title: String,
-    category: String,
-    required_time: f32,
-    completed: bool,
-) -> Element {
+fn ActionRow(obj_index: usize, q_index: usize, a_index: usize, action: ActionView) -> Element {
     let mut state = use_context::<AppState>();
+    let completed = action.completed;
     rsx! {
         div { class: if completed { "action-row done" } else { "action-row" },
             input {
@@ -115,9 +111,9 @@ fn ActionRow(
                 checked: completed,
                 onchange: move |_| state.toggle_action(obj_index, q_index, a_index),
             }
-            span { class: "action-title", "{title}" }
-            span { class: "category", "{category}" }
-            span { class: "time", "{required_time}h" }
+            span { class: "action-title", "{action.content}" }
+            span { class: "category", "{action.category}" }
+            span { class: "time", "{action.required_time}d" }
         }
     }
 }
@@ -180,12 +176,21 @@ fn AddQuestionInput(obj_index: usize) -> Element {
 fn AddActionInput(obj_index: usize, q_index: usize) -> Element {
     let mut state = use_context::<AppState>();
     let mut draft = use_signal(String::new);
+    let mut category = use_signal(|| ACTION_CATEGORIES[0].to_string());
+    let mut time_raw = use_signal(|| "1".to_string());
 
     let mut commit = move || {
         let value = draft.read().trim().to_string();
         if !value.is_empty() {
-            state.add_action(obj_index, q_index, value);
+            let time = time_raw
+                .read()
+                .trim()
+                .parse::<f32>()
+                .unwrap_or(0.0)
+                .max(0.0);
+            state.add_action(obj_index, q_index, value, category.read().clone(), time);
             draft.write().clear();
+            time_raw.set("1".to_string());
         }
     };
 
@@ -198,6 +203,24 @@ fn AddActionInput(obj_index: usize, q_index: usize) -> Element {
                 oninput: move |e| *draft.write() = e.value(),
                 onkeydown: move |e| if e.key() == Key::Enter { commit() },
             }
+            select {
+                class: "category-select",
+                value: "{category}",
+                onchange: move |e| category.set(e.value()),
+                for opt in ACTION_CATEGORIES.iter() {
+                    option { value: "{opt}", "{opt}" }
+                }
+            }
+            input {
+                class: "time-input",
+                r#type: "number",
+                step: "0.25",
+                min: "0",
+                value: "{time_raw}",
+                oninput: move |e| time_raw.set(e.value()),
+                onkeydown: move |e| if e.key() == Key::Enter { commit() },
+            }
+            span { class: "time-suffix", "d" }
             button { onclick: move |_| commit(), "Add" }
         }
     }

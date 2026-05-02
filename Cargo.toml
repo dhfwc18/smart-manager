@@ -12,6 +12,7 @@ edition = "2021"
 
 [dependencies]
 dioxus = { version = "0.7.1", features = ["router"] }
+smart-manager-core = { path = "crates/smart-manager-core" }
 
 [features]
 default = ["desktop"]

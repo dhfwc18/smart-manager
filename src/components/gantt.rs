@@ -1,65 +1,36 @@
 use dioxus::prelude::*;
 
-use crate::app::AppState;
+use crate::app::{AppState, GanttBarData};
 
-const PX_PER_HOUR: f64 = 24.0;
-const ROW_HEIGHT: f64 = 32.0;
-
-struct Bar {
-    objective: String,
-    question: String,
-    action: String,
-    category: String,
-    start_hours: f64,
-    duration_hours: f64,
-    completed: bool,
-}
+const PX_PER_DAY: f64 = 28.0;
+const ROW_HEIGHT: f64 = 36.0;
 
 #[component]
 pub fn GanttView() -> Element {
     let state = use_context::<AppState>();
-    let snapshot = state.objectives.read().clone();
-
-    // Naive layout: stack actions sequentially within each question.
-    // The real engine will replace start_hours with scheduled times.
-    let mut bars: Vec<Bar> = Vec::new();
-    let mut max_end: f64 = 0.0;
-    for obj in snapshot.iter() {
-        for q in obj.questions().iter() {
-            let mut cursor = 0.0_f64;
-            for a in q.actions().iter() {
-                let dur = a.required_time() as f64;
-                bars.push(Bar {
-                    objective: obj.content().to_string(),
-                    question: q.content().to_string(),
-                    action: a.content().to_string(),
-                    category: a.category().as_str().to_string(),
-                    start_hours: cursor,
-                    duration_hours: dur,
-                    completed: a.completed(),
-                });
-                cursor += dur;
-                if cursor > max_end {
-                    max_end = cursor;
-                }
-            }
-        }
-    }
+    let _view = state.view.read();
+    let bars = state.gantt_bars();
 
     if bars.is_empty() {
         return rsx! {
             section { class: "gantt-view",
                 h1 { "Gantt" }
                 div { class: "empty",
-                    "No actions yet. Bars will appear once questions have actions."
+                    "No objectives with remaining work yet."
                 }
             }
         };
     }
 
-    let total_hours = max_end.ceil().max(1.0);
-    let chart_width = total_hours * PX_PER_HOUR;
+    let max_days = bars
+        .iter()
+        .map(|b| b.days as f64)
+        .fold(0.0_f64, f64::max)
+        .ceil()
+        .max(1.0);
+    let chart_width = max_days * PX_PER_DAY + 160.0;
     let chart_height = bars.len() as f64 * ROW_HEIGHT;
+    let total_days = max_days as u32;
 
     rsx! {
         section { class: "gantt-view",
@@ -69,11 +40,11 @@ pub fn GanttView() -> Element {
                     class: "gantt-chart",
                     style: "width: {chart_width}px;",
                     div { class: "gantt-axis",
-                        for h in 0..(total_hours as u32) {
+                        for d in 0..total_days {
                             div {
                                 class: "gantt-axis-tick",
-                                style: "left: {h as f64 * PX_PER_HOUR}px; width: {PX_PER_HOUR}px;",
-                                "{h}h"
+                                style: "left: {160.0 + d as f64 * PX_PER_DAY}px; width: {PX_PER_DAY}px;",
+                                "D{d}"
                             }
                         }
                     }
@@ -81,17 +52,7 @@ pub fn GanttView() -> Element {
                         class: "gantt-rows",
                         style: "height: {chart_height}px;",
                         for (i, bar) in bars.into_iter().enumerate() {
-                            GanttBar {
-                                key: "{i}",
-                                row: i,
-                                objective: bar.objective,
-                                question: bar.question,
-                                action: bar.action,
-                                category: bar.category,
-                                start_hours: bar.start_hours,
-                                duration_hours: bar.duration_hours,
-                                completed: bar.completed,
-                            }
+                            GanttBar { key: "{i}", row: i, bar }
                         }
                     }
                 }
@@ -101,28 +62,28 @@ pub fn GanttView() -> Element {
 }
 
 #[component]
-fn GanttBar(
-    row: usize,
-    objective: String,
-    question: String,
-    action: String,
-    category: String,
-    start_hours: f64,
-    duration_hours: f64,
-    completed: bool,
-) -> Element {
-    let left = start_hours * PX_PER_HOUR;
-    let width = duration_hours.max(0.25) * PX_PER_HOUR;
+fn GanttBar(row: usize, bar: GanttBarData) -> Element {
+    let width = (bar.days as f64).max(0.25) * PX_PER_DAY;
     let top = row as f64 * ROW_HEIGHT + 4.0;
     let height = ROW_HEIGHT - 8.0;
-    let tooltip = format!("{objective} › {question}\n{action} ({category}, {duration_hours}h)");
+    let left = 160.0_f64;
+    let label_top = top;
+    let priority_class = bar.priority.to_lowercase();
+    let group = bar.group.clone().unwrap_or_else(|| "Ungrouped".to_string());
+    let tooltip = format!("{} ({}, {} day(s))", bar.name, bar.priority, bar.days);
 
     rsx! {
         div {
-            class: if completed { "gantt-bar done" } else { "gantt-bar" },
+            class: "gantt-row-label",
+            style: "top: {label_top}px; height: {height}px;",
+            span { class: "gantt-group", "{group}" }
+            span { class: "gantt-name", "{bar.name}" }
+        }
+        div {
+            class: "gantt-bar priority-{priority_class}",
             style: "left: {left}px; top: {top}px; width: {width}px; height: {height}px;",
             title: "{tooltip}",
-            span { class: "gantt-bar-label", "{action}" }
+            span { class: "gantt-bar-label", "{bar.days}d" }
         }
     }
 }

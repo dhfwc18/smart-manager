@@ -2,8 +2,6 @@ use dioxus::prelude::*;
 
 mod app;
 mod components;
-mod dummy;
-mod models;
 
 use app::Route;
 
