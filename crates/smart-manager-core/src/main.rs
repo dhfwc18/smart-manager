@@ -2,9 +2,8 @@ use smart_manager_core::core::App;
 use smart_manager_core::questions::{
     ActionCategory, ActionPoint, Objective, Question, QuestionPriority, Tag,
 };
-use smart_manager_core::writer::gantt::{self, GanttFormat};
-use smart_manager_core::writer::objectives_to_gantt_tasks;
-use smart_manager_core::writer::todo::{self, TodoFormat};
+use smart_manager_core::writer::gantt::GanttFormat;
+use smart_manager_core::writer::todo::TodoFormat;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -303,11 +302,10 @@ fn cmd_save(app: &App, path: &str) {
 }
 
 fn cmd_dashboard(app: &App) {
-    let tasks = objectives_to_gantt_tasks(app.objectives());
     println!("===== TODOs =====\n");
-    println!("{}", todo::render(&tasks, TodoFormat::Markdown));
+    println!("{}", app.render_todo(TodoFormat::Markdown));
     println!("===== Gantt =====\n");
-    println!("{}", gantt::render(&tasks, GanttFormat::Ascii));
+    println!("{}", app.render_gantt(GanttFormat::Ascii));
 }
 
 fn parse_id(s: &str) -> Option<Vec<usize>> {
