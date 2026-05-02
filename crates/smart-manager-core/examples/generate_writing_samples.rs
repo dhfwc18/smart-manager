@@ -27,7 +27,7 @@ fn main() {
     write(&dir, "gantt.md", &app.render_gantt(GanttFormat::Markdown));
     write(&dir, "gantt.txt", &app.render_gantt(GanttFormat::Ascii));
     write(&dir, "gantt.json", &app.render_gantt(GanttFormat::Json));
-    write(&dir, "todo.md", &app.render_todo(TodoFormat::Markdown));
+    write(&dir, "TODO.md", &app.render_todo(TodoFormat::Markdown));
     write(&dir, "todo.html", &app.render_todo(TodoFormat::Html));
 
     println!("rendered {} artifacts from {}", 5, case.display());

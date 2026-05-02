@@ -12,7 +12,7 @@ const TEMPLATES: &[Template] = &[
         name: "TODO_HTML",
     },
     Template {
-        path: "templates/todo.md",
+        path: "templates/TODO.md",
         name: "TODO_MD",
     },
     Template {
