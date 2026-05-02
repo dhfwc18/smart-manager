@@ -1,28 +1,54 @@
 use std::fs;
 use std::path::Path;
 
-const TODO_TEMPLATE: &str = "templates/todo.html";
 const BODY_MARKER: &str = "<!-- BODY -->";
 
+/// Templates that wrap dynamic body content. Each template file must contain
+/// exactly one `<!-- BODY -->` marker; the build splits it into HEAD/TAIL
+/// constants named `<NAME>_HEAD` and `<NAME>_TAIL`.
+const TEMPLATES: &[Template] = &[
+    Template {
+        path: "templates/todo.html",
+        name: "TODO_HTML",
+    },
+    Template {
+        path: "templates/todo.md",
+        name: "TODO_MD",
+    },
+    Template {
+        path: "templates/gantt.md",
+        name: "GANTT_MD",
+    },
+];
+
+struct Template {
+    path: &'static str,
+    name: &'static str,
+}
+
 fn main() {
-    println!("cargo:rerun-if-changed={}", TODO_TEMPLATE);
     println!("cargo:rerun-if-changed=build.rs");
-
-    let template = fs::read_to_string(TODO_TEMPLATE)
-        .unwrap_or_else(|e| panic!("read template '{}': {}", TODO_TEMPLATE, e));
-
-    let (head, tail) = template.split_once(BODY_MARKER).unwrap_or_else(|| {
-        panic!(
-            "template '{}' must contain exactly one '{}' marker",
-            TODO_TEMPLATE, BODY_MARKER
-        )
-    });
-
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR set by cargo");
-    let dest = Path::new(&out_dir).join("todo_template.rs");
-    let generated = format!(
-        "const TODO_HTML_HEAD: &str = {:?};\nconst TODO_HTML_TAIL: &str = {:?};\n",
-        head, tail
-    );
-    fs::write(&dest, generated).expect("write generated todo_template.rs");
+
+    for tpl in TEMPLATES {
+        println!("cargo:rerun-if-changed={}", tpl.path);
+
+        let source = fs::read_to_string(tpl.path)
+            .unwrap_or_else(|e| panic!("read template '{}': {}", tpl.path, e));
+        let (head, tail) = source.split_once(BODY_MARKER).unwrap_or_else(|| {
+            panic!(
+                "template '{}' must contain exactly one '{}' marker",
+                tpl.path, BODY_MARKER
+            )
+        });
+
+        let dest = Path::new(&out_dir).join(format!("{}_template.rs", tpl.name.to_lowercase()));
+        let generated = format!(
+            "const {name}_HEAD: &str = {head:?};\nconst {name}_TAIL: &str = {tail:?};\n",
+            name = tpl.name,
+            head = head,
+            tail = tail,
+        );
+        fs::write(&dest, generated).unwrap_or_else(|e| panic!("write {}: {}", dest.display(), e));
+    }
 }

@@ -142,42 +142,14 @@ fn sanitize_mermaid(s: &str) -> String {
         .collect()
 }
 
-const MERMAID_FRONTMATTER: &str = "---
-config:
-  theme: base
-  themeVariables:
-    taskBkgColor: '#1f3a5f'
-    taskBorderColor: '#000000'
-    taskTextColor: '#ffffff'
-    taskTextLightColor: '#ffffff'
-    taskTextDarkColor: '#ffffff'
-    taskTextOutsideColor: '#ffffff'
-    critBkgColor: '#7a1f1f'
-    critBorderColor: '#000000'
-    activeTaskBkgColor: '#1f5a4a'
-    activeTaskBorderColor: '#000000'
-    doneTaskBkgColor: '#1f3a5f'
-    doneTaskBorderColor: '#000000'
-    sectionBkgColor: '#2a2a2a'
-    altSectionBkgColor: '#1a1a1a'
-    sectionBkgColor2: '#3a3a3a'
-    gridColor: '#888888'
-    titleColor: '#ffffff'
-    textColor: '#ffffff'
-    primaryTextColor: '#ffffff'
-    todayLineColor: '#ff6b6b'
----
-";
-
 const GANTT_BASE_DATE: &str = "2025-01-01";
 
+include!(concat!(env!("OUT_DIR"), "/gantt_md_template.rs"));
+
 fn render_markdown(tasks: &[GanttTask]) -> String {
-    let mut s = format!(
-        "```mermaid\n{}gantt\n    title Schedule\n    dateFormat YYYY-MM-DD\n    axisFormat %m-%d\n",
-        MERMAID_FRONTMATTER
-    );
+    let mut s = String::from(GANTT_MD_HEAD);
     if tasks.is_empty() {
-        s.push_str("```\n");
+        s.push_str(GANTT_MD_TAIL);
         return s;
     }
     let mut id_counter: usize = 0;
@@ -207,7 +179,7 @@ fn render_markdown(tasks: &[GanttTask]) -> String {
             prev_id = Some(tid);
         }
     }
-    s.push_str("```\n");
+    s.push_str(GANTT_MD_TAIL);
     s
 }
 

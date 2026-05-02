@@ -33,10 +33,13 @@ fn priority_class(p: Priority) -> &'static str {
     }
 }
 
+include!(concat!(env!("OUT_DIR"), "/todo_md_template.rs"));
+
 fn render_markdown(tasks: &[GanttTask]) -> String {
-    let mut s = String::from("# TODO\n\n");
+    let mut s = String::from(TODO_MD_HEAD);
     if tasks.is_empty() {
         s.push_str("(no tasks)\n");
+        s.push_str(TODO_MD_TAIL);
         return s;
     }
     for (section, section_tasks) in grouped_sorted(tasks) {
@@ -51,6 +54,7 @@ fn render_markdown(tasks: &[GanttTask]) -> String {
         }
         s.push('\n');
     }
+    s.push_str(TODO_MD_TAIL);
     s
 }
 
@@ -69,7 +73,7 @@ fn html_escape(s: &str) -> String {
     out
 }
 
-include!(concat!(env!("OUT_DIR"), "/todo_template.rs"));
+include!(concat!(env!("OUT_DIR"), "/todo_html_template.rs"));
 
 fn render_html(tasks: &[GanttTask]) -> String {
     let mut s = String::from(TODO_HTML_HEAD);
