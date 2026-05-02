@@ -1,0 +1,17 @@
+[package]
+name = "smart-manager-core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "smart_manager_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "smanager"
+path = "src/main.rs"
+
+[dependencies]
+comfy-table = "7.2.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
