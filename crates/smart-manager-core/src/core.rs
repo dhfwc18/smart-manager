@@ -294,11 +294,11 @@ impl App {
     }
 
     pub fn render_gantt(&self, format: GanttFormat) -> String {
-        gantt::render(&self.gantt_tasks(), format)
+        gantt::render(&self.objectives, format)
     }
 
     pub fn save_gantt(&self, format: GanttFormat, path: &Path) -> std::io::Result<()> {
-        gantt::save(&self.gantt_tasks(), format, path)
+        gantt::save(&self.objectives, format, path)
     }
 
     pub fn render_todo(&self, format: TodoFormat) -> String {

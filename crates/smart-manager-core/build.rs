@@ -16,8 +16,12 @@ const TEMPLATES: &[Template] = &[
         name: "TODO_MD",
     },
     Template {
-        path: "templates/gantt.md",
-        name: "GANTT_MD",
+        path: "templates/gantt_chart.md",
+        name: "GANTT_CHART_MD",
+    },
+    Template {
+        path: "templates/gantt_table.md",
+        name: "GANTT_TABLE_MD",
     },
 ];
 
