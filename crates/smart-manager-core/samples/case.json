@@ -1,0 +1,121 @@
+{
+  "objectives": [
+    {
+      "content": "Ship MVP",
+      "questions": [
+        {
+          "id": 0,
+          "content": "Is the data model right?",
+          "priority": "High",
+          "actions": [
+            {
+              "content": "Design schema",
+              "category": "Analysis",
+              "required_time": 2.0,
+              "completed": false
+            },
+            {
+              "content": "Write migration",
+              "category": "Programming",
+              "required_time": 1.0,
+              "completed": false
+            }
+          ],
+          "prereq": null,
+          "answered": false
+        },
+        {
+          "id": 1,
+          "content": "Which platforms first?",
+          "priority": "Medium",
+          "actions": [
+            {
+              "content": "Compare desktop vs web",
+              "category": "Research",
+              "required_time": 1.5,
+              "completed": false
+            },
+            {
+              "content": "Decision doc",
+              "category": "Writing",
+              "required_time": 0.5,
+              "completed": false
+            }
+          ],
+          "prereq": 0,
+          "answered": false
+        },
+        {
+          "id": 2,
+          "content": "Who is the pilot user?",
+          "priority": "Critical",
+          "actions": [
+            {
+              "content": "Outreach to candidates",
+              "category": "Managing",
+              "required_time": 2.0,
+              "completed": false
+            }
+          ],
+          "prereq": null,
+          "answered": false
+        }
+      ],
+      "tags": ["work", "q4"],
+      "met": false,
+      "next_question_id": 3
+    },
+    {
+      "content": "Refresh public docs",
+      "questions": [
+        {
+          "id": 0,
+          "content": "Are docs current?",
+          "priority": "Low",
+          "actions": [
+            {
+              "content": "Audit landing page",
+              "category": "Qa",
+              "required_time": 1.0,
+              "completed": true
+            },
+            {
+              "content": "Rewrite quickstart",
+              "category": "Writing",
+              "required_time": 2.0,
+              "completed": false
+            }
+          ],
+          "prereq": null,
+          "answered": false
+        }
+      ],
+      "tags": ["work"],
+      "met": false,
+      "next_question_id": 1
+    },
+    {
+      "content": "Learn type theory",
+      "questions": [
+        {
+          "id": 0,
+          "content": "What's the right textbook?",
+          "priority": "LongTerm",
+          "actions": [
+            {
+              "content": "Read TaPL ch.1",
+              "category": "Research",
+              "required_time": 3.0,
+              "completed": false
+            }
+          ],
+          "prereq": null,
+          "answered": false
+        }
+      ],
+      "tags": ["personal"],
+      "met": false,
+      "next_question_id": 1
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "tasks": [
+    {
+      "name": "Ship MVP",
+      "days": 7.0,
+      "priority": "Critical",
+      "group": "work"
+    },
+    {
+      "name": "Refresh public docs",
+      "days": 2.0,
+      "priority": "Low",
+      "group": "work"
+    },
+    {
+      "name": "Learn type theory",
+      "days": 3.0,
+      "priority": "LongTerm",
+      "group": "personal"
+    }
+  ]
+}
